@@ -42,7 +42,17 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 
 `./install.sh` is idempotent for user configs: existing `shell.qml` / `kwinrc` are kept.
 
+## Default keybinds (installed)
+
+| Shortcut | Action | Notes |
+|---|---|---|
+| Super+Q | Close focused window | Remaps KWin **Window Close** (Alt+F4 still works) |
+| Super+T | Launch **kitty** | Clears KWin default **Edit Tiles** (was Meta+T) |
+
+Conflict check: Plasma/KWin default **Meta+T = Toggle Tiling / Edit Tiles** — we disable that binding so the terminal wins. **Meta+Q** is Activities in full Plasma; Apollo does not ship plasmashell, so it is free for close.
+
 ## Where to put keybinds
+
 
 | Layer | Config |
 |---|---|

@@ -174,6 +174,36 @@ else
   info "keep existing $NVIM_CFG (not overwriting LazyVim/neovim config)"
 fi
 
+
+# --- global shortcuts (Super+Q close, Super+T kitty) ---
+KGSRC="${XDG_CONFIG_HOME:-$HOME/.config}/kglobalshortcutsrc"
+KGSNIP="$ROOT/config/kglobalshortcutsrc.snippet"
+if [[ -f "$KGSNIP" ]]; then
+  mkdir -p "$(dirname "$KGSRC")"
+  if [[ ! -f "$KGSRC" ]]; then
+    install -m 0644 "$KGSNIP" "$KGSRC"
+    info "wrote $KGSRC (Meta+Q close, Meta+T kitty)"
+  else
+    # idempotent-ish: ensure our bindings exist / override conflicting Meta+T tiles
+    if ! grep -q '^Window Close=Meta+Q' "$KGSRC" 2>/dev/null; then
+      if grep -q '^Window Close=' "$KGSRC"; then
+        sed -i 's/^Window Close=.*/Window Close=Meta+Q\\tAlt+F4,Alt+F4,Close Window/' "$KGSRC"
+      else
+        printf '\n[kwin]\nWindow Close=Meta+Q\\tAlt+F4,Alt+F4,Close Window\n' >> "$KGSRC"
+      fi
+    fi
+    if grep -q '^Edit Tiles=' "$KGSRC"; then
+      sed -i 's/^Edit Tiles=.*/Edit Tiles=none,Meta+T,Toggle Tiling/' "$KGSRC"
+    fi
+    if ! grep -q '\[services\]\[kitty.desktop\]' "$KGSRC"; then
+      printf '\n[services][kitty.desktop]\n_k_friendly_name=kitty\n_launch=Meta+T,none,Launch kitty\n' >> "$KGSRC"
+    else
+      sed -i '/\[services\]\[kitty.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+T,none,Launch kitty/;}' "$KGSRC" || true
+    fi
+    info "updated shortcuts in $KGSRC"
+  fi
+fi
+
 # --- wallpapers (pixel-perfect copy, no recompress) ---
 WP_SRC="$ROOT/wallpapers"
 WP_DST="${XDG_PICTURES_DIR:-$HOME/Pictures}/wallpapers"

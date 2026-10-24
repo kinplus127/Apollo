@@ -1,0 +1,10 @@
+[kwin]
+# Super+Q → close/kill focused window (Alt+F4 kept as secondary)
+# Default Edit Tiles was Meta+T — cleared so Super+T can open terminal
+Window Close=Meta+Q\tAlt+F4,Alt+F4,Close Window
+Edit Tiles=none,Meta+T,Toggle Tiling
+Kill Window=Meta+Ctrl+Esc,Meta+Ctrl+Esc,Kill Window
+
+[services][kitty.desktop]
+_k_friendly_name=kitty
+_launch=Meta+T,none,Launch kitty
