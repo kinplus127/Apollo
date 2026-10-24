@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# Wrapper installed to /usr/local/bin so the .desktop Exec= is simple.
-set -euo pipefail
-ROOT="${UNIVERSE_KWIN_ROOT:-/usr/local/share/universe-kwin}"
-exec bash "$ROOT/scripts/start-universe.sh"

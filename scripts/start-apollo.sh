@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Minimal KWin + Quickshell session starter (no plasmashell).
+# Apollo session: KWin + Quickshell (no plasmashell).
 set -euo pipefail
 
-export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-Universe:KDE}"
-export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-Universe}"
+export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-Apollo:KDE}"
+export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-Apollo}"
 export XDG_SESSION_TYPE=wayland
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 export QT_WAYLAND_DISABLE_WINDOWDECORATION=0
@@ -20,17 +20,19 @@ elif [[ -x /usr/lib/polkit-kde-agent-1 ]]; then
   /usr/lib/polkit-kde-agent-1 &
 fi
 
-# universed = your unified settings center daemon (Wi-Fi/BT/monitors/look/keybinds/exec)
-if command -v universed >/dev/null 2>&1; then
+# apollod = unified settings center daemon (Wi-Fi/BT/monitors/look/keybinds/exec)
+if command -v apollod >/dev/null 2>&1; then
+  apollod &
+elif command -v universed >/dev/null 2>&1; then
+  # temporary alias while the daemon is renamed
   universed &
 fi
 
 # Shell UI (config name = folder under ~/.config/quickshell/)
 if command -v quickshell >/dev/null 2>&1; then
-  quickshell universe &
+  quickshell apollo &
 else
   echo "warning: quickshell not found; starting KWin only" >&2
 fi
 
-# Compositor is the session leader
 exec kwin_wayland

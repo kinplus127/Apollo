@@ -15,7 +15,7 @@ ShellRoot {
     Text {
       anchors.centerIn: parent
       color: "#e0e0e0"
-      text: "Universe · edit ~/.config/quickshell/universe/shell.qml"
+      text: "Apollo · edit ~/.config/quickshell/apollo/shell.qml"
       font.pixelSize: 12
     }
   }

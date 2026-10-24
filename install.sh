@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Apollo / Universe KWin + Quickshell — fresh Arch TTY installer
+# Apollo — KWin + Quickshell fresh Arch TTY installer
 # Usage (normal user with sudo):
 #   git clone https://github.com/kinplus127/Apollo.git ~/Apollo && cd ~/Apollo && ./install.sh
 set -euo pipefail
@@ -31,41 +31,32 @@ fi
 
 # --- packages ---
 PACMAN_PKGS=(
-  # compositor + decorations (not plasmashell)
   kwin
   breeze
   kglobalaccel
   kglobalacceld
   kscreenlocker
-  # portals / auth
   xdg-desktop-portal
   xdg-desktop-portal-kde
   polkit-kde-agent
-  # Qt / Wayland
   qt6-wayland
   qt6-declarative
   qt6-svg
   qt6-multimedia
   qt6-5compat
-  # audio
   pipewire
   wireplumber
-  # greeter (TTY UI; replaces SDDM)
   greetd
   greetd-tuigreet
-  # NVIDIA proprietary stack + Wayland bits
-  # Use nvidia-open instead of nvidia on very new GPUs if the closed driver fails.
   nvidia
   nvidia-utils
   egl-wayland
   libglvnd
-  # utilities
   wl-clipboard
   libnotify
   networkmanager
   bluez
   bluez-utils
-  # AUR / build
   base-devel
   git
 )
@@ -73,27 +64,22 @@ PACMAN_PKGS=(
 info "installing official packages..."
 sudo pacman -Syu --needed --noconfirm "${PACMAN_PKGS[@]}"
 
-# Prefer greetd over SDDM if SDDM was pulled in somehow
 if systemctl list-unit-files sddm.service >/dev/null 2>&1; then
   sudo systemctl disable sddm.service 2>/dev/null || true
   info "disabled sddm.service (using greetd + tuigreet instead)"
 fi
 
-# --- NVIDIA modesetting (needed for Wayland compositors) ---
+# --- NVIDIA modesetting ---
 info "configuring NVIDIA DRM modeset..."
 sudo tee /etc/modprobe.d/nvidia.conf >/dev/null <<'NVIDIA'
-# Required for Wayland (KWin) with the proprietary driver
 options nvidia_drm modeset=1
 options nvidia_drm fbdev=1
 NVIDIA
 
-# Ensure early load via mkinitcpio when using the stock linux kernel
 if [[ -f /etc/mkinitcpio.conf ]]; then
   if ! grep -qE '(^| )nvidia( |$)' /etc/mkinitcpio.conf; then
-    # Append NVIDIA modules if MODULES=() is empty-ish; safest: ensure line contains them
     if grep -q '^MODULES=' /etc/mkinitcpio.conf; then
       sudo sed -i 's/^MODULES=(\(.*\))/MODULES=(\1 nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' /etc/mkinitcpio.conf
-      # Clean double spaces / empty leading
       sudo sed -i 's/MODULES=(  */MODULES=(/; s/  )/)/' /etc/mkinitcpio.conf
       info "updated MODULES in /etc/mkinitcpio.conf — rebuilding initramfs..."
       sudo mkinitcpio -P || warn "mkinitcpio failed; reboot may still work if modules load later"
@@ -123,22 +109,21 @@ install_yay
 info "installing quickshell from AUR..."
 yay -S --needed --noconfirm quickshell
 
-# --- install session files ---
-SHARE_DIR=/usr/local/share/universe-kwin
-BIN_WRAPPER=/usr/local/bin/universe-kwin-session
-DESKTOP_DST=/usr/local/share/wayland-sessions/universe-kwin.desktop
+# --- install session files (Apollo brand) ---
+SHARE_DIR=/usr/local/share/apollo
+BIN_WRAPPER=/usr/local/bin/apollo-session
+DESKTOP_DST=/usr/local/share/wayland-sessions/apollo.desktop
 
 info "installing session scripts to $SHARE_DIR ..."
 sudo mkdir -p "$SHARE_DIR/scripts" /usr/local/share/wayland-sessions /usr/local/bin
-sudo install -m 0755 "$ROOT/scripts/start-universe.sh" "$SHARE_DIR/scripts/start-universe.sh"
-sudo tee "$BIN_WRAPPER" >/dev/null <<'WRAP'
-#!/usr/bin/env bash
-set -euo pipefail
-export UNIVERSE_KWIN_ROOT=/usr/local/share/universe-kwin
-exec bash "$UNIVERSE_KWIN_ROOT/scripts/start-universe.sh"
-WRAP
-sudo chmod 0755 "$BIN_WRAPPER"
-sudo install -m 0644 "$ROOT/session/universe-kwin.desktop" "$DESKTOP_DST"
+sudo install -m 0755 "$ROOT/scripts/start-apollo.sh" "$SHARE_DIR/scripts/start-apollo.sh"
+sudo install -m 0755 "$ROOT/scripts/apollo-session" "$BIN_WRAPPER"
+sudo install -m 0644 "$ROOT/session/apollo.desktop" "$DESKTOP_DST"
+
+# Remove old Universe-branded session if present
+sudo rm -f /usr/local/bin/universe-kwin-session \
+  /usr/local/share/wayland-sessions/universe-kwin.desktop
+sudo rm -rf /usr/local/share/universe-kwin
 
 # --- greetd + tuigreet ---
 info "configuring greetd + tuigreet..."
@@ -148,17 +133,23 @@ sudo tee /etc/greetd/config.toml >/dev/null <<'GREETD'
 vt = 1
 
 [default_session]
-# TUI greeter; sessions come from wayland-sessions .desktop files
 command = "tuigreet --time --remember --asterisks --sessions /usr/local/share/wayland-sessions:/usr/share/wayland-sessions"
 user = "greeter"
 GREETD
 
 # --- user config (idempotent) ---
-QS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/universe"
+QS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/apollo"
 mkdir -p "$QS_DIR"
 if [[ ! -f "$QS_DIR/shell.qml" ]]; then
-  install -m 0644 "$ROOT/config/quickshell/shell.qml" "$QS_DIR/shell.qml"
-  info "wrote $QS_DIR/shell.qml"
+  # migrate from old universe config if present
+  OLD_QS="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/universe/shell.qml"
+  if [[ -f "$OLD_QS" ]]; then
+    install -m 0644 "$OLD_QS" "$QS_DIR/shell.qml"
+    info "migrated Quickshell config from universe → apollo"
+  else
+    install -m 0644 "$ROOT/config/quickshell/shell.qml" "$QS_DIR/shell.qml"
+    info "wrote $QS_DIR/shell.qml"
+  fi
 else
   info "keep existing $QS_DIR/shell.qml"
 fi
@@ -181,28 +172,28 @@ sudo systemctl enable greetd.service
 cat <<'DONE'
 
 ============================================================
-Apollo / Universe KWin install finished.
+Apollo install finished.
 
 Installed / configured:
-  - KWin + Breeze + Quickshell (no plasmashell)
+  - Apollo DE: KWin + Breeze + Quickshell (no plasmashell)
   - NVIDIA proprietary driver + modeset=1 (Wayland)
   - greetd + tuigreet (NOT SDDM)
   - NetworkManager + BlueZ
 
 Next:
   1) reboot
-  2) at tuigreet, pick session: "Universe (KWin + Quickshell)"
-  3) edit shell:  ~/.config/quickshell/universe/shell.qml
+  2) at tuigreet, pick session: "Apollo"
+  3) edit shell:  ~/.config/quickshell/apollo/shell.qml
   4) edit kwin:   ~/.config/kwinrc
 
 NVIDIA note:
   - Closed driver package is `nvidia`. On some new GPUs switch to `nvidia-open`.
-  - After kernel updates, keep headers/driver in sync.
 
-universed:
-  - That name is the planned Go daemon for your unified settings center
+apollod:
+  - Planned Go daemon for your unified settings center
     (Wi-Fi, Bluetooth, monitors, Quickshell look/feel, keybinds, exec).
-  - Not installed yet; start-universe.sh will launch it when it is on PATH.
+  - Not installed yet; start-apollo.sh launches it when on PATH.
+  - (old name was universed; both work until the rename lands)
 
 Re-run safely: ./install.sh  (existing user configs are kept)
 ============================================================

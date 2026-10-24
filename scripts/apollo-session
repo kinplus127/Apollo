@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="${APOLLO_ROOT:-/usr/local/share/apollo}"
+exec bash "$ROOT/scripts/start-apollo.sh"

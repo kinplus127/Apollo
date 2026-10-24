@@ -1,12 +1,12 @@
 # Apollo
 
-Minimal **Arch Linux** desktop stack:
+Minimal **Arch Linux** desktop environment:
 
 - **KWin** (Wayland compositor + title bars / decorations)
 - **Quickshell** (bar / shell UI — no `plasmashell`)
 - **greetd + tuigreet** (TTY greeter — not SDDM)
 - **NVIDIA** proprietary driver with DRM modeset for Wayland
-- hooks for a future Go **`universed`** settings daemon (your unified settings center)
+- hooks for a future Go **`apollod`** settings daemon (unified settings center)
 
 ## Install (TTY)
 
@@ -18,22 +18,22 @@ cd ~/Apollo
 sudo reboot
 ```
 
-At **tuigreet**, pick **Universe (KWin + Quickshell)**.
+At **tuigreet**, pick **Apollo**.
 
-## What `universed` is
+## What `apollod` is
 
-`universed` is the planned name for the Go daemon behind your **unified settings center**: system + appearance + behaviour (Wi‑Fi, Bluetooth, monitors, Quickshell look & feel, keybinds, exec/autostart). The session script starts it automatically once the binary is on `PATH`. It is **not** installed by this script yet.
+`apollod` is the planned Go daemon behind your **unified settings center**: system + appearance + behaviour (Wi‑Fi, Bluetooth, monitors, Quickshell look & feel, keybinds, exec/autostart). The session script starts it automatically once the binary is on `PATH`. It is **not** installed by this script yet. (Earlier drafts called this `universed`.)
 
 ## Layout after install
 
 | Path | Role |
 |---|---|
-| `/usr/local/bin/universe-kwin-session` | greetd/tuigreet session entrypoint |
-| `/usr/local/share/universe-kwin/scripts/start-universe.sh` | starts Quickshell + `kwin_wayland` |
-| `/usr/local/share/wayland-sessions/universe-kwin.desktop` | session desktop file |
+| `/usr/local/bin/apollo-session` | greetd/tuigreet session entrypoint |
+| `/usr/local/share/apollo/scripts/start-apollo.sh` | starts Quickshell + `kwin_wayland` |
+| `/usr/local/share/wayland-sessions/apollo.desktop` | session desktop file |
 | `/etc/greetd/config.toml` | tuigreet as default greeter |
 | `/etc/modprobe.d/nvidia.conf` | `nvidia_drm modeset=1` |
-| `~/.config/quickshell/universe/shell.qml` | stub bar |
+| `~/.config/quickshell/apollo/shell.qml` | stub bar |
 | `~/.config/kwinrc` | created only if missing |
 
 ## Re-run
