@@ -182,7 +182,7 @@ if [[ -f "$KGSNIP" ]]; then
   mkdir -p "$(dirname "$KGSRC")"
   if [[ ! -f "$KGSRC" ]]; then
     install -m 0644 "$KGSNIP" "$KGSRC"
-    info "wrote $KGSRC (Meta+Q close, Meta+T kitty)"
+    info "wrote $KGSRC (Meta+Q close, Meta+T kitty, Meta+Shift+T tiles)"
   else
     # idempotent-ish: ensure our bindings exist / override conflicting Meta+T tiles
     if ! grep -q '^Window Close=Meta+Q' "$KGSRC" 2>/dev/null; then
@@ -193,7 +193,7 @@ if [[ -f "$KGSNIP" ]]; then
       fi
     fi
     if grep -q '^Edit Tiles=' "$KGSRC"; then
-      sed -i 's/^Edit Tiles=.*/Edit Tiles=none,Meta+T,Toggle Tiling/' "$KGSRC"
+      sed -i 's/^Edit Tiles=.*/Edit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling/' "$KGSRC"
     fi
     if ! grep -q '\[services\]\[kitty.desktop\]' "$KGSRC"; then
       printf '\n[services][kitty.desktop]\n_k_friendly_name=kitty\n_launch=Meta+T,none,Launch kitty\n' >> "$KGSRC"

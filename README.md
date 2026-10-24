@@ -47,9 +47,10 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 | Shortcut | Action | Notes |
 |---|---|---|
 | Super+Q | Close focused window | Remaps KWin **Window Close** (Alt+F4 still works) |
-| Super+T | Launch **kitty** | Clears KWin default **Edit Tiles** (was Meta+T) |
+| Super+T | Launch **kitty** | Takes former Meta+T slot from Edit Tiles |
+| Super+Shift+T | KWin **Edit Tiles** | Tiling layout editor (moved off Super+T) |
 
-Conflict check: Plasma/KWin default **Meta+T = Toggle Tiling / Edit Tiles** — we disable that binding so the terminal wins. **Meta+Q** is Activities in full Plasma; Apollo does not ship plasmashell, so it is free for close.
+Conflict check: Plasma/KWin default **Meta+T = Edit Tiles** — we move that to **Meta+Shift+T** so Super+T can open kitty. **Meta+Q** is Activities in full Plasma; Apollo does not ship plasmashell, so it is free for close.
 
 ## Where to put keybinds
 
