@@ -128,8 +128,8 @@ install_yay
 info "installing quickshell from AUR..."
 yay -S --needed --noconfirm quickshell
 
-info "installing brave-bin (official Brave) from AUR..."
-yay -S --needed --noconfirm brave-bin
+info "installing brave-origin-bin (official Brave) from AUR..."
+yay -S --needed --noconfirm brave-origin-bin
 
 # --- install session files (Apollo brand) ---
 SHARE_DIR=/usr/local/share/apollo

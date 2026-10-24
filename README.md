@@ -7,7 +7,7 @@ Minimal **Arch Linux** desktop environment:
 - **greetd** autologin (no greeter UI — not tuigreet / SDDM)
 - **fish** as the account login shell
 - **kitty**, **yazi**, **Neovim + LazyVim**
-- **Brave** (official, AUR `brave-bin`)
+- **Brave** (official, AUR `brave-origin-bin`)
 - **NVIDIA** `nvidia-open` + `nvidia-utils` + `libva-nvidia-driver`
 - hooks for a future Go **`apollod`** settings daemon (unified settings center)
 
