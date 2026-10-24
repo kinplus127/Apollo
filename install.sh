@@ -69,6 +69,9 @@ PACMAN_PKGS=(
   fzf
   unzip
   wl-clipboard
+  cliphist
+  wl-clip-persist
+  spectacle
   libnotify
   networkmanager
   bluez
@@ -398,10 +401,14 @@ sudo install -m 0755 "$ROOT/scripts/apollo-logout.sh" "$SHARE_DIR/scripts/apollo
 sudo install -m 0644 "$ROOT/session/apollo.desktop" "$DESKTOP_DST"
 sudo install -m 0644 "$ROOT/session/apollo-lock.desktop" /usr/local/share/applications/apollo-lock.desktop
 sudo install -m 0644 "$ROOT/session/apollo-logout.desktop" /usr/local/share/applications/apollo-logout.desktop
+sudo install -m 0644 "$ROOT/session/apollo-screenshot-region.desktop" /usr/local/share/applications/apollo-screenshot-region.desktop
+sudo install -m 0644 "$ROOT/session/apollo-screenshot-full.desktop" /usr/local/share/applications/apollo-screenshot-full.desktop
 USER_APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 mkdir -p "$USER_APP_DIR"
 install -m 0644 "$ROOT/session/apollo-lock.desktop" "$USER_APP_DIR/apollo-lock.desktop"
 install -m 0644 "$ROOT/session/apollo-logout.desktop" "$USER_APP_DIR/apollo-logout.desktop"
+install -m 0644 "$ROOT/session/apollo-screenshot-region.desktop" "$USER_APP_DIR/apollo-screenshot-region.desktop"
+install -m 0644 "$ROOT/session/apollo-screenshot-full.desktop" "$USER_APP_DIR/apollo-screenshot-full.desktop"
 
 # Remove old Universe-branded session if present
 sudo rm -f /usr/local/bin/universe-kwin-session \
@@ -439,14 +446,14 @@ else
 fi
 
 
-# --- global shortcuts (Super+Q close, Super+T kitty) ---
+# --- global shortcuts (Super+Q close, Super+T kitty, Super+C screenshots) ---
 KGSRC="${XDG_CONFIG_HOME:-$HOME/.config}/kglobalshortcutsrc"
 KGSNIP="$ROOT/config/kglobalshortcutsrc.snippet"
 if [[ -f "$KGSNIP" ]]; then
   mkdir -p "$(dirname "$KGSRC")"
   if [[ ! -f "$KGSRC" ]]; then
     install -m 0644 "$KGSNIP" "$KGSRC"
-    info "wrote $KGSRC (Meta+Q close, Meta+T kitty, Meta+Shift+T tiles, Meta+L lock, Meta+Shift+L logout)"
+    info "wrote $KGSRC (Meta+Q close, Meta+T kitty, Meta+Shift+T tiles, Meta+L lock, Meta+Shift+L logout, Meta+C region, Meta+Shift+C fullscreen)"
   else
     # idempotent-ish: ensure our bindings exist / override conflicting Meta+T tiles
     if ! grep -q '^Window Close=Meta+Q' "$KGSRC" 2>/dev/null; then
@@ -473,6 +480,16 @@ if [[ -f "$KGSNIP" ]]; then
       printf '\n[services][apollo-logout.desktop]\n_k_friendly_name=Log Out\n_launch=Meta+Shift+L,none,Log Out\n' >> "$KGSRC"
     else
       sed -i '/\[services\]\[apollo-logout.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+Shift+L,none,Log Out/;}' "$KGSRC" || true
+    fi
+    if ! grep -q '\[services\]\[apollo-screenshot-region.desktop\]' "$KGSRC"; then
+      printf '\n[services][apollo-screenshot-region.desktop]\n_k_friendly_name=Capture Region\n_launch=Meta+C,none,Capture Region\n' >> "$KGSRC"
+    else
+      sed -i '/\[services\]\[apollo-screenshot-region.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+C,none,Capture Region/;}' "$KGSRC" || true
+    fi
+    if ! grep -q '\[services\]\[apollo-screenshot-full.desktop\]' "$KGSRC"; then
+      printf '\n[services][apollo-screenshot-full.desktop]\n_k_friendly_name=Capture Full Screen\n_launch=Meta+Shift+C,none,Capture Full Screen\n' >> "$KGSRC"
+    else
+      sed -i '/\[services\]\[apollo-screenshot-full.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+Shift+C,none,Capture Full Screen/;}' "$KGSRC" || true
     fi
     info "updated shortcuts in $KGSRC"
   fi
@@ -548,6 +565,8 @@ Installed / configured:
   - awww wallpaper daemon (random image from ~/Pictures/wallpapers/)
   - fcitx5: Sucheng (Quick3) + Mozc romaji
   - Super+L lock, Super+Shift+L log out
+  - Spectacle: Super+C region, Super+Shift+C full screen
+  - cliphist + wl-clip-persist (clipboard history; regular clipboard survives app exit)
   - NetworkManager + BlueZ
 
 Next:

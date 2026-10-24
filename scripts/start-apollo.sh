@@ -136,6 +136,64 @@ start_fcitx5() {
 
 start_fcitx5 || echo "warning: input method setup failed" >&2
 
+# Clipboard persistence and history. Same lifecycle as the wallpaper and IME
+# helpers: wait for KWin's socket, then daemonise. Failure must not abort the session.
+start_clipboard() {
+  local have_persist=0 have_hist=0
+  if command -v wl-clip-persist >/dev/null 2>&1; then
+    have_persist=1
+  fi
+  if command -v wl-paste >/dev/null 2>&1 && command -v cliphist >/dev/null 2>&1; then
+    have_hist=1
+  fi
+  if [[ "$have_persist" -ne 1 && "$have_hist" -ne 1 ]]; then
+    echo "warning: clipboard helpers not found; skipping" >&2
+    return 0
+  fi
+
+  (
+    local runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    local display="" i sock=""
+    for i in {1..50}; do
+      if [[ -n "${WAYLAND_DISPLAY:-}" && -S "$runtime/$WAYLAND_DISPLAY" ]]; then
+        display="$WAYLAND_DISPLAY"
+        break
+      fi
+      sock="$(find "$runtime" -maxdepth 1 -type s -name 'wayland-*' -print -quit 2>/dev/null || true)"
+      if [[ -n "$sock" ]]; then
+        display="$(basename "$sock")"
+        break
+      fi
+      sleep 0.1
+    done
+    if [[ -z "$display" ]]; then
+      echo "warning: Wayland display not ready; skipping clipboard" >&2
+      exit 0
+    fi
+    export WAYLAND_DISPLAY="$display"
+
+    if command -v wl-clip-persist >/dev/null 2>&1; then
+      if ! command -v pgrep >/dev/null 2>&1 || ! pgrep -x wl-clip-persist >/dev/null 2>&1; then
+        wl-clip-persist --clipboard regular >/dev/null &
+      fi
+    else
+      echo "warning: wl-clip-persist not found; clipboard will not survive app exit" >&2
+    fi
+
+    # cliphist has no watch subcommand; this is the current upstream listener.
+    if command -v wl-paste >/dev/null 2>&1 && command -v cliphist >/dev/null 2>&1; then
+      if ! command -v pgrep >/dev/null 2>&1 || ! pgrep -x wl-paste >/dev/null 2>&1; then
+        wl-paste --watch cliphist store >/dev/null &
+      fi
+    else
+      echo "warning: wl-paste or cliphist not found; skipping clipboard history" >&2
+    fi
+  ) &
+  return 0
+}
+
+start_clipboard || echo "warning: clipboard setup failed" >&2
+
 # Shell UI (config name = folder under ~/.config/quickshell/)
 if command -v quickshell >/dev/null 2>&1; then
   quickshell apollo &

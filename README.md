@@ -11,6 +11,8 @@ Minimal **Arch Linux** desktop environment:
 - **Brave** (official, AUR `brave-origin-bin`)
 - **Fonts:** IBM Plex (GitHub desktop OTF, including CJK), Noroshi Code, Apple Color Emoji, Symbols Nerd Font
 - **awww** wallpaper daemon (official `awww`, the successor of swww)
+- **Spectacle** screenshots
+- **cliphist**, **wl-clipboard**, and **wl-clip-persist** (clipboard history; the regular clipboard survives after the source app exits)
 - **NVIDIA** `nvidia-open` + `nvidia-utils` + `libva-nvidia-driver`
 - hooks for a future Go **`apollod`** settings daemon (unified settings center)
 
@@ -35,7 +37,7 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 | Path | Role |
 |---|---|
 | `/usr/local/bin/apollo-session` | greetd session entrypoint |
-| `/usr/local/share/apollo/scripts/start-apollo.sh` | starts Quickshell, awww, and `kwin_wayland` |
+| `/usr/local/share/apollo/scripts/start-apollo.sh` | starts Quickshell, awww, clipboard helpers, and `kwin_wayland` |
 | `/usr/local/share/wayland-sessions/apollo.desktop` | session desktop file |
 | `/etc/greetd/config.toml` | autologin into Apollo (no greeter) |
 | `~/.config/quickshell/apollo/shell.qml` | stub bar and notification toasts |
@@ -57,8 +59,10 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 | Super+Shift+T | KWin **Edit Tiles** | Tiling layout editor (moved off Super+T) |
 | Super+L | Lock session | `loginctl lock-session`, then the KDE screensaver D-Bus interface |
 | Super+Shift+L | Log out | `loginctl terminate-session` for this session |
+| Super+C | Capture a rectangular region | `spectacle --background --region` (selector, then save; no viewer) |
+| Super+Shift+C | Capture the full desktop | `spectacle --background --fullscreen` |
 
-Conflict check: Plasma/KWin default **Meta+T = Edit Tiles** — we move that to **Meta+Shift+T** so Super+T can open kitty. **Meta+Q** is Activities in full Plasma; Apollo does not ship plasmashell, so it is free for close. **Meta+L** is Plasma's lock shortcut; here it runs Apollo's locker script instead of plasmashell.
+Conflict check: Plasma/KWin default **Meta+T = Edit Tiles** — we move that to **Meta+Shift+T** so Super+T can open kitty. **Meta+Q** is Activities in full Plasma; Apollo does not ship plasmashell, so it is free for close. **Meta+L** is Plasma's lock shortcut; here it runs Apollo's locker script instead of plasmashell. **Meta+C** and **Meta+Shift+C** were unused. **Ctrl+C** is left as copy / interrupt.
 
 ## Input method
 
@@ -109,3 +113,9 @@ Re-run updates those font keys and leaves other kitty, GTK, and `kdeglobals` set
 Login starts **awww** (`awww-daemon` + `awww img`). The package is official extra `awww`, which provides and replaces `swww`; `swww` is not installed. If that package is absent from the mirror, the installer falls back to AUR `awww-git`.
 
 The session picks a random `jpg`, `jpeg`, `png`, `webp`, `gif`, or `bmp` from `~/Pictures/wallpapers/` (`$XDG_PICTURES_DIR` when set). A missing or empty folder, or an awww failure, is a warning only — KWin still starts.
+
+## Screenshots and clipboard
+
+**Spectacle** (official `spectacle`) takes screenshots. Super+C runs `spectacle --background --region`: the region selector appears, and the shot is saved without the Spectacle viewer. Super+Shift+C runs `spectacle --background --fullscreen` and exits. `spectacle` with no arguments opens the full window.
+
+Clipboard history is **cliphist**, written by `wl-paste --watch cliphist store` (cliphist has no `watch` subcommand). **wl-clip-persist --clipboard regular** keeps that clipboard after the application you copied from exits. **wl-clipboard** is the copy/paste tool underneath. A history picker can wait until Apollo has a launcher. Until then, recall an entry with `cliphist list | cliphist decode | wl-copy`. A missing helper is a warning only — KWin still starts.

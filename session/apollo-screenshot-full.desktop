@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Capture Full Screen
+Comment=Capture the entire desktop with Spectacle
+Exec=/usr/bin/spectacle --background --fullscreen
+Icon=org.kde.spectacle
+Terminal=false
+NoDisplay=true
+StartupNotify=false
+X-KDE-GlobalAccel-CommandShortcut=true
