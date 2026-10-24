@@ -13,6 +13,120 @@ die()   { printf '%s error: %s\n' "$LOG_PREFIX" "$*" >&2; exit 1; }
 
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 
+# One sudo password for the whole install. The background refresh keeps the
+# timestamp alive across long pacman/yay builds. sudo -n -v never prompts
+# and stops if timestamp_timeout is 0.
+start_sudo_keepalive() {
+  while true; do
+    sudo -n -v || exit 0
+    sleep 50
+    kill -0 "$$" 2>/dev/null || exit 0
+  done
+}
+
+cleanup_sudo_keepalive() {
+  if [[ -n "${SUDO_KEEPALIVE_PID:-}" ]]; then
+    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    wait "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+  fi
+}
+
+# One pacman transaction for every official package, including awww when the
+# mirror has it. Home-directory theme and font copies stay outside and do not
+# use sudo.
+install_official_packages() {
+  local flag="$1"
+  shift
+  sudo bash -s -- "$flag" "$@" <<'EOS'
+set -euo pipefail
+flag="$1"
+shift
+pkgs=("$@")
+pacman -Sy --noconfirm
+# awww replaced swww. If the mirror does not have it yet, the AUR fallback
+# runs later as the installing user.
+if pacman -Si awww >/dev/null 2>&1; then
+  pkgs+=(awww)
+  printf 'official\n' >"$flag"
+fi
+pacman -Su --needed --noconfirm "${pkgs[@]}"
+EOS
+}
+
+apply_root_setup() {
+  local fish_bin="$1"
+  info "applying root setup once (login shell, session files, greetd, services)..."
+  sudo bash -s -- "$INSTALL_USER" "$ROOT" "$fish_bin" <<'EOS'
+set -euo pipefail
+user="$1"
+root="$2"
+fish_bin="$3"
+log() { printf '[apollo] %s\n' "$*"; }
+
+if [[ -n "$fish_bin" && -x "$fish_bin" ]]; then
+  if ! grep -qxF "$fish_bin" /etc/shells 2>/dev/null; then
+    log "adding $fish_bin to /etc/shells"
+    printf '%s\n' "$fish_bin" >>/etc/shells
+  fi
+  current="$(getent passwd "$user" | cut -d: -f7 || true)"
+  if [[ "$current" != "$fish_bin" ]]; then
+    log "setting login shell for $user → $fish_bin"
+    chsh -s "$fish_bin" "$user"
+  else
+    log "login shell already fish for $user"
+  fi
+fi
+
+if pacman -Q greetd-tuigreet >/dev/null 2>&1; then
+  log "removing greetd-tuigreet..."
+  pacman -Rns --noconfirm greetd-tuigreet || log "warning: could not remove greetd-tuigreet"
+fi
+if systemctl list-unit-files --no-legend 'sddm.service' 2>/dev/null | grep -q .; then
+  systemctl disable sddm.service >/dev/null 2>&1 || true
+  log "disabled sddm.service"
+fi
+
+share=/usr/local/share/apollo
+log "installing session scripts to $share"
+mkdir -p "$share/scripts" /usr/local/share/wayland-sessions /usr/local/bin \
+  /usr/local/share/applications /etc/greetd
+install -m 0755 "$root/scripts/start-apollo.sh" "$share/scripts/start-apollo.sh"
+install -m 0755 "$root/scripts/apollo-session" /usr/local/bin/apollo-session
+install -m 0755 "$root/scripts/apollo-lock.sh" "$share/scripts/apollo-lock.sh"
+install -m 0755 "$root/scripts/apollo-logout.sh" "$share/scripts/apollo-logout.sh"
+install -m 0755 "$root/scripts/apollo-theme-nt.sh" "$share/scripts/apollo-theme-nt.sh"
+install -m 0755 "$root/scripts/apollo-theme-nt.sh" /usr/local/bin/apollo-theme-nt
+install -m 0644 "$root/session/apollo.desktop" /usr/local/share/wayland-sessions/apollo.desktop
+install -m 0644 "$root/session/apollo-lock.desktop" /usr/local/share/applications/apollo-lock.desktop
+install -m 0644 "$root/session/apollo-logout.desktop" /usr/local/share/applications/apollo-logout.desktop
+install -m 0644 "$root/session/apollo-screenshot-region.desktop" /usr/local/share/applications/apollo-screenshot-region.desktop
+install -m 0644 "$root/session/apollo-screenshot-full.desktop" /usr/local/share/applications/apollo-screenshot-full.desktop
+rm -f /usr/local/bin/universe-kwin-session \
+  /usr/local/share/wayland-sessions/universe-kwin.desktop
+rm -rf /usr/local/share/universe-kwin
+
+cat >/etc/greetd/config.toml <<EOF
+[terminal]
+vt = 1
+
+# Boot straight into Apollo as ${user} — no greeter.
+[initial_session]
+command = "apollo-session"
+user = "${user}"
+
+# After logout / session exit, start Apollo again (still no greeter).
+[default_session]
+command = "apollo-session"
+user = "${user}"
+EOF
+
+log "enabling NetworkManager, bluetooth, greetd..."
+systemctl enable NetworkManager.service || log "warning: could not enable NetworkManager"
+systemctl enable bluetooth.service || log "warning: could not enable bluetooth"
+systemctl enable greetd.service
+EOS
+}
+
 if [[ ${EUID:-0} -eq 0 ]]; then
   die "run as a normal user (script will call sudo). do not run as root."
 fi
@@ -25,9 +139,13 @@ if [[ ! -f /etc/arch-release ]]; then
   die "this installer targets Arch Linux (/etc/arch-release not found)"
 fi
 
-if ! sudo -n true 2>/dev/null; then
-  info "sudo password may be required"
-fi
+# Ask once. pacman, yay, greetd, and /usr/local reuse this timestamp.
+info "enter your sudo password once; later privileged steps reuse it"
+sudo -v
+SUDO_KEEPALIVE_PID=""
+trap cleanup_sudo_keepalive EXIT
+start_sudo_keepalive >/dev/null 2>&1 &
+SUDO_KEEPALIVE_PID=$!
 
 INSTALL_USER="${SUDO_USER:-$USER}"
 if [[ "$INSTALL_USER" == root ]] || [[ -z "$INSTALL_USER" ]]; then
@@ -101,40 +219,31 @@ PACMAN_PKGS=(
   fcitx5-mozc
   base-devel
   git
+  fontconfig
+  ttf-nerd-fonts-symbols
+  ttf-nerd-fonts-symbols-mono
+  gsettings-desktop-schemas
 )
-
-info "installing official packages..."
-sudo pacman -Syu --needed --noconfirm "${PACMAN_PKGS[@]}"
-
-# Drop greeters / display managers we do not want
-if pacman -Q greetd-tuigreet >/dev/null 2>&1; then
-  info "removing greetd-tuigreet..."
-  sudo pacman -Rns --noconfirm greetd-tuigreet || warn "could not remove greetd-tuigreet"
-fi
-if systemctl list-unit-files sddm.service >/dev/null 2>&1; then
-  sudo systemctl disable sddm.service 2>/dev/null || true
-  info "disabled sddm.service"
-fi
 
 # NVIDIA modeset: shipped by Arch nvidia-utils (no extra modprobe/mkinitcpio here).
 
-# --- fish as login shell for this account ---
-FISH_BIN="$(command -v fish)"
-if [[ -n "$FISH_BIN" ]]; then
-  if ! grep -qxF "$FISH_BIN" /etc/shells 2>/dev/null; then
-    info "adding $FISH_BIN to /etc/shells"
-    echo "$FISH_BIN" | sudo tee -a /etc/shells >/dev/null
-  fi
-  CURRENT_SHELL="$(getent passwd "$INSTALL_USER" | cut -d: -f7 || true)"
-  if [[ "$CURRENT_SHELL" != "$FISH_BIN" ]]; then
-    info "setting login shell for $INSTALL_USER → $FISH_BIN"
-    sudo chsh -s "$FISH_BIN" "$INSTALL_USER"
-  else
-    info "login shell already fish for $INSTALL_USER"
-  fi
+info "installing official packages..."
+AWWW_FLAG="$(mktemp)"
+install_official_packages "$AWWW_FLAG" "${PACMAN_PKGS[@]}"
+if [[ "$(<"$AWWW_FLAG")" == "official" ]]; then
+  AWWW_FROM_OFFICIAL=1
+  info "awww included from the official repositories"
 else
+  AWWW_FROM_OFFICIAL=0
+fi
+rm -f "$AWWW_FLAG"
+
+# --- fish, session files, greetd, services: one root shell ---
+FISH_BIN="$(command -v fish || true)"
+if [[ -z "$FISH_BIN" ]]; then
   warn "fish binary not found after install"
 fi
+apply_root_setup "$FISH_BIN"
 
 # --- AUR helper (yay) ---
 install_yay() {
@@ -151,22 +260,18 @@ install_yay() {
   (cd "$tmp/yay" && makepkg -si --noconfirm)
 }
 
+# Refresh the timestamp before builds. No prompt while the keepalive holds.
+sudo -v
+
 install_yay
 
-info "installing quickshell from AUR..."
-yay -S --needed --noconfirm quickshell
-
-info "installing brave-origin-bin (official Brave) from AUR..."
-yay -S --needed --noconfirm brave-origin-bin
-
-# --- wallpaper backend (awww; replaces swww — do not install swww) ---
-if pacman -Si awww >/dev/null 2>&1; then
-  info "installing awww from official repositories..."
-  sudo pacman -S --needed --noconfirm awww
-else
-  info "awww not in the official repositories; installing awww-git from AUR..."
-  yay -S --needed --noconfirm awww-git
+AUR_PKGS=(quickshell brave-origin-bin ttf-apple-emoji)
+if [[ "$AWWW_FROM_OFFICIAL" -ne 1 ]]; then
+  info "awww is not in the official repositories; installing awww-git from AUR"
+  AUR_PKGS+=(awww-git)
 fi
+info "installing AUR packages: ${AUR_PKGS[*]}"
+yay -S --needed --noconfirm "${AUR_PKGS[@]}"
 
 # --- fonts ---
 # IBM Plex release zips mix in woff/woff2, so copy desktop OTF only
@@ -378,16 +483,6 @@ apply_gsettings_fonts() {
   fi
 }
 
-info "installing fontconfig, Nerd Font symbols, and gsettings schemas..."
-sudo pacman -S --needed --noconfirm \
-  fontconfig \
-  ttf-nerd-fonts-symbols \
-  ttf-nerd-fonts-symbols-mono \
-  gsettings-desktop-schemas
-
-info "installing ttf-apple-emoji from AUR..."
-yay -S --needed --noconfirm ttf-apple-emoji
-
 install_ibm_plex
 install_noroshi
 
@@ -401,54 +496,14 @@ fi
 apply_font_configs
 apply_gsettings_fonts
 
-# --- install session files (Apollo brand) ---
-SHARE_DIR=/usr/local/share/apollo
-BIN_WRAPPER=/usr/local/bin/apollo-session
-DESKTOP_DST=/usr/local/share/wayland-sessions/apollo.desktop
-
-info "installing session scripts to $SHARE_DIR ..."
-sudo mkdir -p "$SHARE_DIR/scripts" /usr/local/share/wayland-sessions /usr/local/bin \
-  /usr/local/share/applications
-sudo install -m 0755 "$ROOT/scripts/start-apollo.sh" "$SHARE_DIR/scripts/start-apollo.sh"
-sudo install -m 0755 "$ROOT/scripts/apollo-session" "$BIN_WRAPPER"
-sudo install -m 0755 "$ROOT/scripts/apollo-lock.sh" "$SHARE_DIR/scripts/apollo-lock.sh"
-sudo install -m 0755 "$ROOT/scripts/apollo-logout.sh" "$SHARE_DIR/scripts/apollo-logout.sh"
-sudo install -m 0755 "$ROOT/scripts/apollo-theme-nt.sh" "$SHARE_DIR/scripts/apollo-theme-nt.sh"
-sudo install -m 0755 "$ROOT/scripts/apollo-theme-nt.sh" /usr/local/bin/apollo-theme-nt
-sudo install -m 0644 "$ROOT/session/apollo.desktop" "$DESKTOP_DST"
-sudo install -m 0644 "$ROOT/session/apollo-lock.desktop" /usr/local/share/applications/apollo-lock.desktop
-sudo install -m 0644 "$ROOT/session/apollo-logout.desktop" /usr/local/share/applications/apollo-logout.desktop
-sudo install -m 0644 "$ROOT/session/apollo-screenshot-region.desktop" /usr/local/share/applications/apollo-screenshot-region.desktop
-sudo install -m 0644 "$ROOT/session/apollo-screenshot-full.desktop" /usr/local/share/applications/apollo-screenshot-full.desktop
+# Session binaries and greetd were installed in apply_root_setup.
+# These desktop files are for the user session and stay unprivileged.
 USER_APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 mkdir -p "$USER_APP_DIR"
 install -m 0644 "$ROOT/session/apollo-lock.desktop" "$USER_APP_DIR/apollo-lock.desktop"
 install -m 0644 "$ROOT/session/apollo-logout.desktop" "$USER_APP_DIR/apollo-logout.desktop"
 install -m 0644 "$ROOT/session/apollo-screenshot-region.desktop" "$USER_APP_DIR/apollo-screenshot-region.desktop"
 install -m 0644 "$ROOT/session/apollo-screenshot-full.desktop" "$USER_APP_DIR/apollo-screenshot-full.desktop"
-
-# Remove old Universe-branded session if present
-sudo rm -f /usr/local/bin/universe-kwin-session \
-  /usr/local/share/wayland-sessions/universe-kwin.desktop
-sudo rm -rf /usr/local/share/universe-kwin
-
-# --- greetd: no greeter UI, autologin this account into Apollo ---
-info "configuring greetd autologin for $INSTALL_USER (no tuigreet)..."
-sudo mkdir -p /etc/greetd
-sudo tee /etc/greetd/config.toml >/dev/null <<GREETD
-[terminal]
-vt = 1
-
-# Boot straight into Apollo as ${INSTALL_USER} — no greeter.
-[initial_session]
-command = "apollo-session"
-user = "${INSTALL_USER}"
-
-# After logout / session exit, start Apollo again (still no greeter).
-[default_session]
-command = "apollo-session"
-user = "${INSTALL_USER}"
-GREETD
 
 
 
@@ -587,12 +642,6 @@ else
   info "NT Legacy variant already chosen ($(<"$NT_APPLIED")); not switching"
 fi
 "$ROOT/scripts/apollo-theme-nt.sh" ensure-file-manager
-
-# --- services ---
-info "enabling NetworkManager, bluetooth, greetd..."
-sudo systemctl enable NetworkManager.service || warn "could not enable NetworkManager"
-sudo systemctl enable bluetooth.service || warn "could not enable bluetooth"
-sudo systemctl enable greetd.service
 
 cat <<DONE
 

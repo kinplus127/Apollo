@@ -30,6 +30,10 @@ sudo reboot
 
 After reboot, greetd starts **Apollo** as the installing user with no login screen.
 
+`./install.sh` asks for the sudo password **once**. Package installs, greetd, and files under `/usr/local` reuse that authentication, including across long builds. Fonts, the NT Legacy theme, and everything under your home directory do not use sudo. `sudo reboot` afterwards is a separate command.
+
+`./install.sh` 只會詢問一次 sudo 密碼。套件、greetd 與 `/usr/local` 會沿用該授權，包括耗時較長的編譯。字型、NT Legacy 主題，以及家目錄內的檔案不會使用 sudo。最後的 `sudo reboot` 是另一次指令。
+
 ## What `apollod` is
 
 `apollod` is the planned Go daemon behind your **unified settings center**: system + appearance + behaviour (Wi‑Fi, Bluetooth, monitors, Quickshell look & feel, keybinds, exec/autostart). The session script starts it automatically once the binary is on `PATH`. It is **not** installed by this script yet.
