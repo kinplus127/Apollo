@@ -131,6 +131,15 @@ yay -S --needed --noconfirm quickshell
 info "installing brave-origin-bin (official Brave) from AUR..."
 yay -S --needed --noconfirm brave-origin-bin
 
+# --- wallpaper backend (awww; replaces swww — do not install swww) ---
+if pacman -Si awww >/dev/null 2>&1; then
+  info "installing awww from official repositories..."
+  sudo pacman -S --needed --noconfirm awww
+else
+  info "awww not in the official repositories; installing awww-git from AUR..."
+  yay -S --needed --noconfirm awww-git
+fi
+
 # --- fonts ---
 # IBM Plex release zips mix in woff/woff2, so copy desktop OTF only
 # (fonts/complete/otf, hinted when CJK splits hinted/unhinted).
@@ -498,11 +507,12 @@ Installed / configured:
   - fish as login shell for ${INSTALL_USER}
   - kitty, yazi, neovim + LazyVim starter
   - fonts: IBM Plex OTF, Noroshi Code, Apple Color Emoji, Symbols Nerd Font
+  - awww wallpaper daemon (random image from ~/Pictures/wallpapers/)
   - NetworkManager + BlueZ
 
 Next:
   1) reboot → should land in Apollo automatically
-  2) wallpapers: ~/Pictures/wallpapers/
+  2) wallpapers: ~/Pictures/wallpapers/ (awww picks one at login)
   3) edit shell:  ~/.config/quickshell/apollo/shell.qml
   4) edit kwin:   ~/.config/kwinrc
 

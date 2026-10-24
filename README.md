@@ -9,6 +9,7 @@ Minimal **Arch Linux** desktop environment:
 - **kitty**, **yazi**, **Neovim + LazyVim**
 - **Brave** (official, AUR `brave-origin-bin`)
 - **Fonts:** IBM Plex (GitHub desktop OTF, including CJK), Noroshi Code, Apple Color Emoji, Symbols Nerd Font
+- **awww** wallpaper daemon (official `awww`, the successor of swww)
 - **NVIDIA** `nvidia-open` + `nvidia-utils` + `libva-nvidia-driver`
 - hooks for a future Go **`apollod`** settings daemon (unified settings center)
 
@@ -33,11 +34,11 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 | Path | Role |
 |---|---|
 | `/usr/local/bin/apollo-session` | greetd session entrypoint |
-| `/usr/local/share/apollo/scripts/start-apollo.sh` | starts Quickshell + `kwin_wayland` |
+| `/usr/local/share/apollo/scripts/start-apollo.sh` | starts Quickshell, awww, and `kwin_wayland` |
 | `/usr/local/share/wayland-sessions/apollo.desktop` | session desktop file |
 | `/etc/greetd/config.toml` | autologin into Apollo (no greeter) |
 | `~/.config/quickshell/apollo/shell.qml` | stub bar |
-| `~/Pictures/wallpapers/` | default wallpapers (exact copy from repo) |
+| `~/Pictures/wallpapers/` | default wallpapers; awww picks one at login |
 | `~/.config/kwinrc` | created only if missing |
 | `~/.local/share/fonts/ibm-plex/` | IBM Plex desktop OTF |
 | `~/.local/share/fonts/noroshi/` | Noroshi Code hinted TTF |
@@ -89,3 +90,9 @@ Defaults are written to:
 - kitty `font_family Noroshi Code`
 
 Re-run updates those font keys and leaves other kitty, GTK, and `kdeglobals` settings in place. `shell.qml` and `kwinrc` are still left untouched when they already exist.
+
+## Wallpaper
+
+Login starts **awww** (`awww-daemon` + `awww img`). The package is official extra `awww`, which provides and replaces `swww`; `swww` is not installed. If that package is absent from the mirror, the installer falls back to AUR `awww-git`.
+
+The session picks a random `jpg`, `jpeg`, `png`, `webp`, `gif`, or `bmp` from `~/Pictures/wallpapers/` (`$XDG_PICTURES_DIR` when set). A missing or empty folder, or an awww failure, is a warning only — KWin still starts.
