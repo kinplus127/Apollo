@@ -2,10 +2,11 @@
 
 Minimal **Arch Linux** desktop environment:
 
-- **KWin** (Wayland compositor + title bars / decorations)
+- **KWin** (Wayland compositor + title bars / decorations) and **breeze-icons**
 - **Quickshell** (bar / shell UI — no `plasmashell`)
 - **greetd** autologin (no greeter UI — not tuigreet / SDDM)
 - **fish** as the account login shell
+- **fcitx5** — 速成 (Quick3) and 日本語 Mozc (ローマ字)
 - **kitty**, **yazi**, **Neovim + LazyVim**
 - **Brave** (official, AUR `brave-origin-bin`)
 - **Fonts:** IBM Plex (GitHub desktop OTF, including CJK), Noroshi Code, Apple Color Emoji, Symbols Nerd Font
@@ -37,7 +38,7 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 | `/usr/local/share/apollo/scripts/start-apollo.sh` | starts Quickshell, awww, and `kwin_wayland` |
 | `/usr/local/share/wayland-sessions/apollo.desktop` | session desktop file |
 | `/etc/greetd/config.toml` | autologin into Apollo (no greeter) |
-| `~/.config/quickshell/apollo/shell.qml` | stub bar |
+| `~/.config/quickshell/apollo/shell.qml` | stub bar and notification toasts |
 | `~/Pictures/wallpapers/` | default wallpapers; awww picks one at login |
 | `~/.config/kwinrc` | created only if missing |
 | `~/.local/share/fonts/ibm-plex/` | IBM Plex desktop OTF |
@@ -54,8 +55,20 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 | Super+Q | Close focused window | Remaps KWin **Window Close** (Alt+F4 still works) |
 | Super+T | Launch **kitty** | Takes former Meta+T slot from Edit Tiles |
 | Super+Shift+T | KWin **Edit Tiles** | Tiling layout editor (moved off Super+T) |
+| Super+L | Lock session | `loginctl lock-session`, then the KDE screensaver D-Bus interface |
+| Super+Shift+L | Log out | `loginctl terminate-session` for this session |
 
-Conflict check: Plasma/KWin default **Meta+T = Edit Tiles** — we move that to **Meta+Shift+T** so Super+T can open kitty. **Meta+Q** is Activities in full Plasma; Apollo does not ship plasmashell, so it is free for close.
+Conflict check: Plasma/KWin default **Meta+T = Edit Tiles** — we move that to **Meta+Shift+T** so Super+T can open kitty. **Meta+Q** is Activities in full Plasma; Apollo does not ship plasmashell, so it is free for close. **Meta+L** is Plasma's lock shortcut; here it runs Apollo's locker script instead of plasmashell.
+
+## Input method
+
+fcitx5 starts with the session (`fcitx5 -d`) and these variables: `XMODIFIERS=@im=fcitx`, `GTK_IM_MODULE=fcitx`, `QT_IM_MODULE=fcitx`, `SDL_IM_MODULE=fcitx`.
+
+The seeded profile (`~/.config/fcitx5/profile`, only if you do not already have one) enables **速成** (`Quick3`, the zh_HK table from `fcitx5-table-extra`) and **日本語 Mozc** (ローマ字, `fcitx5-mozc`), plus the US keyboard. An existing profile is left as it is.
+
+## Session bus
+
+`apollo-session` runs `start-apollo.sh` inside `dbus-run-session` when `DBUS_SESSION_BUS_ADDRESS` is unset, so KWin, Quickshell, fcitx5, and the lock shortcut share one session bus. If a bus is already present, it is not wrapped again.
 
 ## Where to put keybinds
 

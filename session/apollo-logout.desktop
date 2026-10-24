@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Log Out
+Comment=End the Apollo session
+Exec=/usr/local/share/apollo/scripts/apollo-logout.sh
+Icon=system-log-out
+Terminal=false
+NoDisplay=true
+StartupNotify=false
+X-KDE-GlobalAccel-CommandShortcut=true

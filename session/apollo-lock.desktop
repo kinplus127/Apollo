@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Lock Session
+Comment=Lock the Apollo session
+Exec=/usr/local/share/apollo/scripts/apollo-lock.sh
+Icon=system-lock-screen
+Terminal=false
+NoDisplay=true
+StartupNotify=false
+X-KDE-GlobalAccel-CommandShortcut=true

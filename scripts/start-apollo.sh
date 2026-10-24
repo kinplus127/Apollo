@@ -14,6 +14,12 @@ export __GLX_VENDOR_LIBRARY_NAME="${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"
 export __NV_PRIME_RENDER_OFFLOAD="${__NV_PRIME_RENDER_OFFLOAD:-1}"
 export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-nvidia}"
 
+# fcitx5: module name stays "fcitx" (Sucheng + Mozc are enabled in the profile).
+export XMODIFIERS="${XMODIFIERS:-@im=fcitx}"
+export GTK_IM_MODULE="${GTK_IM_MODULE:-fcitx}"
+export QT_IM_MODULE="${QT_IM_MODULE:-fcitx}"
+export SDL_IM_MODULE="${SDL_IM_MODULE:-fcitx}"
+
 # Polkit agent (GUI auth prompts)
 if [[ -x /usr/lib/polkit-kde-authentication-agent-1 ]]; then
   /usr/lib/polkit-kde-authentication-agent-1 &
@@ -99,6 +105,36 @@ start_awww_wallpaper() {
 }
 
 start_awww_wallpaper || echo "warning: wallpaper setup failed" >&2
+
+# Input method. Wait for KWin's socket, then daemonise. Failure must not abort the session.
+start_fcitx5() {
+  if ! command -v fcitx5 >/dev/null 2>&1; then
+    echo "warning: fcitx5 not found; skipping input method" >&2
+    return 0
+  fi
+  (
+    local runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    local i sock=""
+    for i in {1..50}; do
+      if [[ -n "${WAYLAND_DISPLAY:-}" && -S "$runtime/$WAYLAND_DISPLAY" ]]; then
+        break
+      fi
+      sock="$(find "$runtime" -maxdepth 1 -type s -name 'wayland-*' -print -quit 2>/dev/null || true)"
+      if [[ -n "$sock" ]]; then
+        export WAYLAND_DISPLAY="$(basename "$sock")"
+        break
+      fi
+      sleep 0.1
+    done
+    if command -v pgrep >/dev/null 2>&1 && pgrep -x fcitx5 >/dev/null 2>&1; then
+      exit 0
+    fi
+    fcitx5 -d || echo "warning: fcitx5 failed to start" >&2
+  ) &
+  return 0
+}
+
+start_fcitx5 || echo "warning: input method setup failed" >&2
 
 # Shell UI (config name = folder under ~/.config/quickshell/)
 if command -v quickshell >/dev/null 2>&1; then

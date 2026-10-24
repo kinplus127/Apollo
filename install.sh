@@ -38,6 +38,8 @@ fi
 PACMAN_PKGS=(
   kwin
   breeze
+  breeze-icons
+  dbus
   kglobalaccel
   kglobalacceld
   kscreenlocker
@@ -71,6 +73,14 @@ PACMAN_PKGS=(
   networkmanager
   bluez
   bluez-utils
+  # Sucheng (Quick3, zh_HK) comes from fcitx5-table-extra; Mozc is romaji.
+  fcitx5
+  fcitx5-qt
+  fcitx5-gtk
+  fcitx5-configtool
+  fcitx5-chinese-addons
+  fcitx5-table-extra
+  fcitx5-mozc
   base-devel
   git
 )
@@ -379,10 +389,19 @@ BIN_WRAPPER=/usr/local/bin/apollo-session
 DESKTOP_DST=/usr/local/share/wayland-sessions/apollo.desktop
 
 info "installing session scripts to $SHARE_DIR ..."
-sudo mkdir -p "$SHARE_DIR/scripts" /usr/local/share/wayland-sessions /usr/local/bin
+sudo mkdir -p "$SHARE_DIR/scripts" /usr/local/share/wayland-sessions /usr/local/bin \
+  /usr/local/share/applications
 sudo install -m 0755 "$ROOT/scripts/start-apollo.sh" "$SHARE_DIR/scripts/start-apollo.sh"
 sudo install -m 0755 "$ROOT/scripts/apollo-session" "$BIN_WRAPPER"
+sudo install -m 0755 "$ROOT/scripts/apollo-lock.sh" "$SHARE_DIR/scripts/apollo-lock.sh"
+sudo install -m 0755 "$ROOT/scripts/apollo-logout.sh" "$SHARE_DIR/scripts/apollo-logout.sh"
 sudo install -m 0644 "$ROOT/session/apollo.desktop" "$DESKTOP_DST"
+sudo install -m 0644 "$ROOT/session/apollo-lock.desktop" /usr/local/share/applications/apollo-lock.desktop
+sudo install -m 0644 "$ROOT/session/apollo-logout.desktop" /usr/local/share/applications/apollo-logout.desktop
+USER_APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+mkdir -p "$USER_APP_DIR"
+install -m 0644 "$ROOT/session/apollo-lock.desktop" "$USER_APP_DIR/apollo-lock.desktop"
+install -m 0644 "$ROOT/session/apollo-logout.desktop" "$USER_APP_DIR/apollo-logout.desktop"
 
 # Remove old Universe-branded session if present
 sudo rm -f /usr/local/bin/universe-kwin-session \
@@ -427,7 +446,7 @@ if [[ -f "$KGSNIP" ]]; then
   mkdir -p "$(dirname "$KGSRC")"
   if [[ ! -f "$KGSRC" ]]; then
     install -m 0644 "$KGSNIP" "$KGSRC"
-    info "wrote $KGSRC (Meta+Q close, Meta+T kitty, Meta+Shift+T tiles)"
+    info "wrote $KGSRC (Meta+Q close, Meta+T kitty, Meta+Shift+T tiles, Meta+L lock, Meta+Shift+L logout)"
   else
     # idempotent-ish: ensure our bindings exist / override conflicting Meta+T tiles
     if ! grep -q '^Window Close=Meta+Q' "$KGSRC" 2>/dev/null; then
@@ -444,6 +463,16 @@ if [[ -f "$KGSNIP" ]]; then
       printf '\n[services][kitty.desktop]\n_k_friendly_name=kitty\n_launch=Meta+T,none,Launch kitty\n' >> "$KGSRC"
     else
       sed -i '/\[services\]\[kitty.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+T,none,Launch kitty/;}' "$KGSRC" || true
+    fi
+    if ! grep -q '\[services\]\[apollo-lock.desktop\]' "$KGSRC"; then
+      printf '\n[services][apollo-lock.desktop]\n_k_friendly_name=Lock Session\n_launch=Meta+L,none,Lock Session\n' >> "$KGSRC"
+    else
+      sed -i '/\[services\]\[apollo-lock.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+L,none,Lock Session/;}' "$KGSRC" || true
+    fi
+    if ! grep -q '\[services\]\[apollo-logout.desktop\]' "$KGSRC"; then
+      printf '\n[services][apollo-logout.desktop]\n_k_friendly_name=Log Out\n_launch=Meta+Shift+L,none,Log Out\n' >> "$KGSRC"
+    else
+      sed -i '/\[services\]\[apollo-logout.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+Shift+L,none,Log Out/;}' "$KGSRC" || true
     fi
     info "updated shortcuts in $KGSRC"
   fi
@@ -480,6 +509,15 @@ else
   info "keep existing $QS_DIR/shell.qml"
 fi
 
+FCITX_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/fcitx5"
+if [[ ! -e "$FCITX_DIR/profile" ]]; then
+  mkdir -p "$FCITX_DIR"
+  install -m 0644 "$ROOT/config/fcitx5/profile" "$FCITX_DIR/profile"
+  info "wrote $FCITX_DIR/profile (Sucheng Quick3 + Mozc)"
+else
+  info "keep existing $FCITX_DIR/profile"
+fi
+
 KWINRC="${XDG_CONFIG_HOME:-$HOME/.config}/kwinrc"
 mkdir -p "$(dirname "$KWINRC")"
 if [[ ! -f "$KWINRC" ]]; then
@@ -508,6 +546,8 @@ Installed / configured:
   - kitty, yazi, neovim + LazyVim starter
   - fonts: IBM Plex OTF, Noroshi Code, Apple Color Emoji, Symbols Nerd Font
   - awww wallpaper daemon (random image from ~/Pictures/wallpapers/)
+  - fcitx5: Sucheng (Quick3) + Mozc romaji
+  - Super+L lock, Super+Shift+L log out
   - NetworkManager + BlueZ
 
 Next:
