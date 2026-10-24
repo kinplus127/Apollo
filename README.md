@@ -1,54 +1,40 @@
-# Universe KWin
+# Apollo
 
 Minimal **Arch Linux** desktop stack:
 
 - **KWin** (Wayland compositor + title bars / decorations)
 - **Quickshell** (bar / shell UI — no `plasmashell`)
-- hooks for a future Go **`universed`** settings daemon
-
-Designed to run right after a fresh Arch install from a **TTY**.
-
-## Requirements
-
-- Arch Linux with network
-- A normal user in the `wheel` group (`sudo` works)
-- UEFI/BIOS already set up; you can finish the Arch install guide through creating a user, then run this before or after enabling a display manager
+- **greetd + tuigreet** (TTY greeter — not SDDM)
+- **NVIDIA** proprietary driver with DRM modeset for Wayland
+- hooks for a future Go **`universed`** settings daemon (your unified settings center)
 
 ## Install (TTY)
 
 ```bash
 sudo pacman -Syu --needed git base-devel
-git clone https://github.com/kinplus127/Apollo.git && cd Apollo && ./install.sh
+git clone https://github.com/kinplus127/Apollo.git ~/Apollo
+cd ~/Apollo
+./install.sh
 sudo reboot
 ```
 
-At SDDM, pick **Universe (KWin + Quickshell)**.
+At **tuigreet**, pick **Universe (KWin + Quickshell)**.
 
-> Or copy this folder onto the machine (`scp` / USB) and run `./install.sh`.
+## What `universed` is
 
-## What it installs
-
-Official repos: `kwin`, `breeze`, portals, `polkit-kde-agent`, Qt6 Wayland bits, PipeWire, `sddm`, NetworkManager, BlueZ, etc.
-
-AUR: `yay` (if missing), then `quickshell`.
-
-It does **not** install `plasma`, `plasma-meta`, or `plasma-desktop`.
+`universed` is the planned name for the Go daemon behind your **unified settings center**: system + appearance + behaviour (Wi‑Fi, Bluetooth, monitors, Quickshell look & feel, keybinds, exec/autostart). The session script starts it automatically once the binary is on `PATH`. It is **not** installed by this script yet.
 
 ## Layout after install
 
 | Path | Role |
 |---|---|
-| `/usr/local/bin/universe-kwin-session` | SDDM session entrypoint |
+| `/usr/local/bin/universe-kwin-session` | greetd/tuigreet session entrypoint |
 | `/usr/local/share/universe-kwin/scripts/start-universe.sh` | starts Quickshell + `kwin_wayland` |
 | `/usr/local/share/wayland-sessions/universe-kwin.desktop` | session desktop file |
-| `~/.config/quickshell/universe/shell.qml` | stub bar (safe to edit) |
+| `/etc/greetd/config.toml` | tuigreet as default greeter |
+| `/etc/modprobe.d/nvidia.conf` | `nvidia_drm modeset=1` |
+| `~/.config/quickshell/universe/shell.qml` | stub bar |
 | `~/.config/kwinrc` | created only if missing |
-
-## Next steps
-
-1. Replace the Quickshell stub with your real shell.
-2. Add tiling via a KWin Script (e.g. Krohnkite) after first GUI login.
-3. Build `universed` and put it on `PATH`; the session script will autostart it.
 
 ## Re-run
 

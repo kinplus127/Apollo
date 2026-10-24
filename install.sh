@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Universe KWin + Quickshell — fresh Arch TTY installer
-# Usage (as your normal user, with sudo):
-#   git clone <this-repo> ~/universe-kwin && cd ~/universe-kwin && ./install.sh
+# Apollo / Universe KWin + Quickshell — fresh Arch TTY installer
+# Usage (normal user with sudo):
+#   git clone https://github.com/kinplus127/Apollo.git ~/Apollo && cd ~/Apollo && ./install.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_PREFIX="[universe-kwin]"
+LOG_PREFIX="[apollo]"
 
 info()  { printf '%s %s\n' "$LOG_PREFIX" "$*"; }
 warn()  { printf '%s warning: %s\n' "$LOG_PREFIX" "$*" >&2; }
@@ -31,7 +31,7 @@ fi
 
 # --- packages ---
 PACMAN_PKGS=(
-  # compositor + decorations stack (pulls KDE frameworks; not plasmashell)
+  # compositor + decorations (not plasmashell)
   kwin
   breeze
   kglobalaccel
@@ -41,30 +41,67 @@ PACMAN_PKGS=(
   xdg-desktop-portal
   xdg-desktop-portal-kde
   polkit-kde-agent
-  # Qt / Wayland bits Quickshell & KWin expect
+  # Qt / Wayland
   qt6-wayland
   qt6-declarative
   qt6-svg
   qt6-multimedia
   qt6-5compat
-  # audio session
+  # audio
   pipewire
   wireplumber
-  # display manager + utilities
-  sddm
+  # greeter (TTY UI; replaces SDDM)
+  greetd
+  greetd-tuigreet
+  # NVIDIA proprietary stack + Wayland bits
+  # Use nvidia-open instead of nvidia on very new GPUs if the closed driver fails.
+  nvidia
+  nvidia-utils
+  egl-wayland
+  libglvnd
+  # utilities
   wl-clipboard
   libnotify
-  # networking defaults for a usable first boot (settings center later)
   networkmanager
   bluez
   bluez-utils
-  # build helpers for yay / AUR
+  # AUR / build
   base-devel
   git
 )
 
 info "installing official packages..."
 sudo pacman -Syu --needed --noconfirm "${PACMAN_PKGS[@]}"
+
+# Prefer greetd over SDDM if SDDM was pulled in somehow
+if systemctl list-unit-files sddm.service >/dev/null 2>&1; then
+  sudo systemctl disable sddm.service 2>/dev/null || true
+  info "disabled sddm.service (using greetd + tuigreet instead)"
+fi
+
+# --- NVIDIA modesetting (needed for Wayland compositors) ---
+info "configuring NVIDIA DRM modeset..."
+sudo tee /etc/modprobe.d/nvidia.conf >/dev/null <<'NVIDIA'
+# Required for Wayland (KWin) with the proprietary driver
+options nvidia_drm modeset=1
+options nvidia_drm fbdev=1
+NVIDIA
+
+# Ensure early load via mkinitcpio when using the stock linux kernel
+if [[ -f /etc/mkinitcpio.conf ]]; then
+  if ! grep -qE '(^| )nvidia( |$)' /etc/mkinitcpio.conf; then
+    # Append NVIDIA modules if MODULES=() is empty-ish; safest: ensure line contains them
+    if grep -q '^MODULES=' /etc/mkinitcpio.conf; then
+      sudo sed -i 's/^MODULES=(\(.*\))/MODULES=(\1 nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' /etc/mkinitcpio.conf
+      # Clean double spaces / empty leading
+      sudo sed -i 's/MODULES=(  */MODULES=(/; s/  )/)/' /etc/mkinitcpio.conf
+      info "updated MODULES in /etc/mkinitcpio.conf — rebuilding initramfs..."
+      sudo mkinitcpio -P || warn "mkinitcpio failed; reboot may still work if modules load later"
+    fi
+  else
+    info "nvidia modules already referenced in mkinitcpio.conf"
+  fi
+fi
 
 # --- AUR helper (yay) ---
 install_yay() {
@@ -94,10 +131,6 @@ DESKTOP_DST=/usr/local/share/wayland-sessions/universe-kwin.desktop
 info "installing session scripts to $SHARE_DIR ..."
 sudo mkdir -p "$SHARE_DIR/scripts" /usr/local/share/wayland-sessions /usr/local/bin
 sudo install -m 0755 "$ROOT/scripts/start-universe.sh" "$SHARE_DIR/scripts/start-universe.sh"
-sudo install -m 0755 "$ROOT/scripts/universe-kwin-session" "$BIN_WRAPPER"
-sudo install -m 0644 "$ROOT/session/universe-kwin.desktop" "$DESKTOP_DST"
-
-# Point wrapper at installed share dir
 sudo tee "$BIN_WRAPPER" >/dev/null <<'WRAP'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -105,6 +138,20 @@ export UNIVERSE_KWIN_ROOT=/usr/local/share/universe-kwin
 exec bash "$UNIVERSE_KWIN_ROOT/scripts/start-universe.sh"
 WRAP
 sudo chmod 0755 "$BIN_WRAPPER"
+sudo install -m 0644 "$ROOT/session/universe-kwin.desktop" "$DESKTOP_DST"
+
+# --- greetd + tuigreet ---
+info "configuring greetd + tuigreet..."
+sudo mkdir -p /etc/greetd
+sudo tee /etc/greetd/config.toml >/dev/null <<'GREETD'
+[terminal]
+vt = 1
+
+[default_session]
+# TUI greeter; sessions come from wayland-sessions .desktop files
+command = "tuigreet --time --remember --asterisks --sessions /usr/local/share/wayland-sessions:/usr/share/wayland-sessions"
+user = "greeter"
+GREETD
 
 # --- user config (idempotent) ---
 QS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/universe"
@@ -126,42 +173,37 @@ else
 fi
 
 # --- services ---
-info "enabling NetworkManager, bluetooth, SDDM..."
+info "enabling NetworkManager, bluetooth, greetd..."
 sudo systemctl enable NetworkManager.service || warn "could not enable NetworkManager"
 sudo systemctl enable bluetooth.service || warn "could not enable bluetooth"
-sudo systemctl enable sddm.service
-
-# Prefer Universe session as SDDM default when unset
-SDDM_CONF_DIR=/etc/sddm.conf.d
-sudo mkdir -p "$SDDM_CONF_DIR"
-if [[ ! -f "$SDDM_CONF_DIR/10-universe-kwin.conf" ]]; then
-  sudo tee "$SDDM_CONF_DIR/10-universe-kwin.conf" >/dev/null <<'SDDM'
-[Autologin]
-# Session=universe-kwin.desktop
-# User=youruser
-
-[General]
-# SDDM lists wayland-sessions; pick "Universe (KWin + Quickshell)" at login
-SDDM
-  info "wrote $SDDM_CONF_DIR/10-universe-kwin.conf"
-fi
+sudo systemctl enable greetd.service
 
 cat <<'DONE'
 
 ============================================================
-Universe KWin install finished.
+Apollo / Universe KWin install finished.
+
+Installed / configured:
+  - KWin + Breeze + Quickshell (no plasmashell)
+  - NVIDIA proprietary driver + modeset=1 (Wayland)
+  - greetd + tuigreet (NOT SDDM)
+  - NetworkManager + BlueZ
 
 Next:
-  1) reboot  (or: sudo systemctl start sddm)
-  2) at SDDM, choose session: "Universe (KWin + Quickshell)"
+  1) reboot
+  2) at tuigreet, pick session: "Universe (KWin + Quickshell)"
   3) edit shell:  ~/.config/quickshell/universe/shell.qml
   4) edit kwin:   ~/.config/kwinrc
 
-Notes:
-  - plasmashell is NOT installed/started on purpose
-  - tiling: install a KWin Script later (e.g. Krohnkite) after first graphical login
-  - universed (Go settings daemon) is optional; start-universe.sh will launch it if on PATH
+NVIDIA note:
+  - Closed driver package is `nvidia`. On some new GPUs switch to `nvidia-open`.
+  - After kernel updates, keep headers/driver in sync.
 
-Re-run safely: ./install.sh  (configs you already edited are kept)
+universed:
+  - That name is the planned Go daemon for your unified settings center
+    (Wi-Fi, Bluetooth, monitors, Quickshell look/feel, keybinds, exec).
+  - Not installed yet; start-universe.sh will launch it when it is on PATH.
+
+Re-run safely: ./install.sh  (existing user configs are kept)
 ============================================================
 DONE
