@@ -4,8 +4,9 @@ Minimal **Arch Linux** desktop environment:
 
 - **KWin** (Wayland compositor + title bars / decorations)
 - **Quickshell** (bar / shell UI — no `plasmashell`)
-- **greetd + tuigreet** (TTY greeter — not SDDM)
-- **NVIDIA** proprietary driver with DRM modeset for Wayland
+- **greetd** autologin (no greeter UI — not tuigreet / SDDM)
+- **fish** as the account login shell
+- **NVIDIA** `nvidia-open` + `nvidia-utils` + `libva-nvidia-driver`
 - hooks for a future Go **`apollod`** settings daemon (unified settings center)
 
 ## Install (TTY)
@@ -18,21 +19,20 @@ cd ~/Apollo
 sudo reboot
 ```
 
-At **tuigreet**, pick **Apollo**.
+After reboot, greetd starts **Apollo** as the installing user with no login screen.
 
 ## What `apollod` is
 
-`apollod` is the planned Go daemon behind your **unified settings center**: system + appearance + behaviour (Wi‑Fi, Bluetooth, monitors, Quickshell look & feel, keybinds, exec/autostart). The session script starts it automatically once the binary is on `PATH`. It is **not** installed by this script yet. (Earlier drafts called this `universed`.)
+`apollod` is the planned Go daemon behind your **unified settings center**: system + appearance + behaviour (Wi‑Fi, Bluetooth, monitors, Quickshell look & feel, keybinds, exec/autostart). The session script starts it automatically once the binary is on `PATH`. It is **not** installed by this script yet.
 
 ## Layout after install
 
 | Path | Role |
 |---|---|
-| `/usr/local/bin/apollo-session` | greetd/tuigreet session entrypoint |
+| `/usr/local/bin/apollo-session` | greetd session entrypoint |
 | `/usr/local/share/apollo/scripts/start-apollo.sh` | starts Quickshell + `kwin_wayland` |
 | `/usr/local/share/wayland-sessions/apollo.desktop` | session desktop file |
-| `/etc/greetd/config.toml` | tuigreet as default greeter |
-| `/etc/modprobe.d/nvidia.conf` | `nvidia_drm modeset=1` |
+| `/etc/greetd/config.toml` | autologin into Apollo (no greeter) |
 | `~/.config/quickshell/apollo/shell.qml` | stub bar |
 | `~/.config/kwinrc` | created only if missing |
 

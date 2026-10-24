@@ -29,6 +29,11 @@ if ! sudo -n true 2>/dev/null; then
   info "sudo password may be required"
 fi
 
+INSTALL_USER="${SUDO_USER:-$USER}"
+if [[ "$INSTALL_USER" == root ]] || [[ -z "$INSTALL_USER" ]]; then
+  INSTALL_USER="$(id -un)"
+fi
+
 # --- packages ---
 PACMAN_PKGS=(
   kwin
@@ -47,11 +52,12 @@ PACMAN_PKGS=(
   pipewire
   wireplumber
   greetd
-  greetd-tuigreet
-  nvidia
+  # NVIDIA: open kernel modules + userspace; VA-API via libva-nvidia-driver.
+  # nvidia-utils already pulls egl-wayland / egl-gbm / libglvnd; Arch enables modeset.
+  nvidia-open
   nvidia-utils
-  egl-wayland
-  libglvnd
+  libva-nvidia-driver
+  fish
   wl-clipboard
   libnotify
   networkmanager
@@ -64,29 +70,34 @@ PACMAN_PKGS=(
 info "installing official packages..."
 sudo pacman -Syu --needed --noconfirm "${PACMAN_PKGS[@]}"
 
+# Drop greeters / display managers we do not want
+if pacman -Q greetd-tuigreet >/dev/null 2>&1; then
+  info "removing greetd-tuigreet..."
+  sudo pacman -Rns --noconfirm greetd-tuigreet || warn "could not remove greetd-tuigreet"
+fi
 if systemctl list-unit-files sddm.service >/dev/null 2>&1; then
   sudo systemctl disable sddm.service 2>/dev/null || true
-  info "disabled sddm.service (using greetd + tuigreet instead)"
+  info "disabled sddm.service"
 fi
 
-# --- NVIDIA modesetting ---
-info "configuring NVIDIA DRM modeset..."
-sudo tee /etc/modprobe.d/nvidia.conf >/dev/null <<'NVIDIA'
-options nvidia_drm modeset=1
-options nvidia_drm fbdev=1
-NVIDIA
+# NVIDIA modeset: shipped by Arch nvidia-utils (no extra modprobe/mkinitcpio here).
 
-if [[ -f /etc/mkinitcpio.conf ]]; then
-  if ! grep -qE '(^| )nvidia( |$)' /etc/mkinitcpio.conf; then
-    if grep -q '^MODULES=' /etc/mkinitcpio.conf; then
-      sudo sed -i 's/^MODULES=(\(.*\))/MODULES=(\1 nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' /etc/mkinitcpio.conf
-      sudo sed -i 's/MODULES=(  */MODULES=(/; s/  )/)/' /etc/mkinitcpio.conf
-      info "updated MODULES in /etc/mkinitcpio.conf — rebuilding initramfs..."
-      sudo mkinitcpio -P || warn "mkinitcpio failed; reboot may still work if modules load later"
-    fi
-  else
-    info "nvidia modules already referenced in mkinitcpio.conf"
+# --- fish as login shell for this account ---
+FISH_BIN="$(command -v fish)"
+if [[ -n "$FISH_BIN" ]]; then
+  if ! grep -qxF "$FISH_BIN" /etc/shells 2>/dev/null; then
+    info "adding $FISH_BIN to /etc/shells"
+    echo "$FISH_BIN" | sudo tee -a /etc/shells >/dev/null
   fi
+  CURRENT_SHELL="$(getent passwd "$INSTALL_USER" | cut -d: -f7 || true)"
+  if [[ "$CURRENT_SHELL" != "$FISH_BIN" ]]; then
+    info "setting login shell for $INSTALL_USER → $FISH_BIN"
+    sudo chsh -s "$FISH_BIN" "$INSTALL_USER"
+  else
+    info "login shell already fish for $INSTALL_USER"
+  fi
+else
+  warn "fish binary not found after install"
 fi
 
 # --- AUR helper (yay) ---
@@ -125,23 +136,28 @@ sudo rm -f /usr/local/bin/universe-kwin-session \
   /usr/local/share/wayland-sessions/universe-kwin.desktop
 sudo rm -rf /usr/local/share/universe-kwin
 
-# --- greetd + tuigreet ---
-info "configuring greetd + tuigreet..."
+# --- greetd: no greeter UI, autologin this account into Apollo ---
+info "configuring greetd autologin for $INSTALL_USER (no tuigreet)..."
 sudo mkdir -p /etc/greetd
-sudo tee /etc/greetd/config.toml >/dev/null <<'GREETD'
+sudo tee /etc/greetd/config.toml >/dev/null <<GREETD
 [terminal]
 vt = 1
 
+# Boot straight into Apollo as ${INSTALL_USER} — no greeter.
+[initial_session]
+command = "apollo-session"
+user = "${INSTALL_USER}"
+
+# After logout / session exit, start Apollo again (still no greeter).
 [default_session]
-command = "tuigreet --time --remember --asterisks --sessions /usr/local/share/wayland-sessions:/usr/share/wayland-sessions"
-user = "greeter"
+command = "apollo-session"
+user = "${INSTALL_USER}"
 GREETD
 
 # --- user config (idempotent) ---
 QS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/apollo"
 mkdir -p "$QS_DIR"
 if [[ ! -f "$QS_DIR/shell.qml" ]]; then
-  # migrate from old universe config if present
   OLD_QS="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/universe/shell.qml"
   if [[ -f "$OLD_QS" ]]; then
     install -m 0644 "$OLD_QS" "$QS_DIR/shell.qml"
@@ -169,31 +185,30 @@ sudo systemctl enable NetworkManager.service || warn "could not enable NetworkMa
 sudo systemctl enable bluetooth.service || warn "could not enable bluetooth"
 sudo systemctl enable greetd.service
 
-cat <<'DONE'
+cat <<DONE
 
 ============================================================
 Apollo install finished.
 
 Installed / configured:
   - Apollo DE: KWin + Breeze + Quickshell (no plasmashell)
-  - NVIDIA proprietary driver + modeset=1 (Wayland)
-  - greetd + tuigreet (NOT SDDM)
+  - NVIDIA: nvidia-open + nvidia-utils + libva-nvidia-driver
+  - greetd autologin as ${INSTALL_USER} (NO greeter / NO tuigreet / NO SDDM)
+  - fish as login shell for ${INSTALL_USER}
   - NetworkManager + BlueZ
 
 Next:
-  1) reboot
-  2) at tuigreet, pick session: "Apollo"
-  3) edit shell:  ~/.config/quickshell/apollo/shell.qml
-  4) edit kwin:   ~/.config/kwinrc
+  1) reboot → should land in Apollo automatically
+  2) edit shell:  ~/.config/quickshell/apollo/shell.qml
+  3) edit kwin:   ~/.config/kwinrc
 
-NVIDIA note:
-  - Closed driver package is `nvidia`. On some new GPUs switch to `nvidia-open`.
+NVIDIA:
+  - modeset comes from Arch's nvidia-utils; egl-wayland is a dep of nvidia-utils
 
 apollod:
   - Planned Go daemon for your unified settings center
     (Wi-Fi, Bluetooth, monitors, Quickshell look/feel, keybinds, exec).
   - Not installed yet; start-apollo.sh launches it when on PATH.
-  - (old name was universed; both work until the rename lands)
 
 Re-run safely: ./install.sh  (existing user configs are kept)
 ============================================================

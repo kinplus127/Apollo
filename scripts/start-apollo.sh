@@ -12,6 +12,7 @@ export QT_WAYLAND_DISABLE_WINDOWDECORATION=0
 export GBM_BACKEND="${GBM_BACKEND:-nvidia-drm}"
 export __GLX_VENDOR_LIBRARY_NAME="${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"
 export __NV_PRIME_RENDER_OFFLOAD="${__NV_PRIME_RENDER_OFFLOAD:-1}"
+export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-nvidia}"
 
 # Polkit agent (GUI auth prompts)
 if [[ -x /usr/lib/polkit-kde-authentication-agent-1 ]]; then
