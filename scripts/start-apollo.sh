@@ -5,8 +5,14 @@ set -euo pipefail
 export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-Apollo:KDE}"
 export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-Apollo}"
 export XDG_SESSION_TYPE=wayland
+# greetd's PATH can omit /usr/local/bin. kitty then starts fish without
+# apollo-theme-nt on PATH ("Unknown command", exit 127).
+PATH="/usr/local/bin:${HOME}/.local/bin:${PATH}"
+export PATH
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 export QT_WAYLAND_DISABLE_WINDOWDECORATION=0
+# plasma-integration reads kdeglobals (NT colours, icons, Windows widget style).
+export QT_QPA_PLATFORMTHEME="${QT_QPA_PLATFORMTHEME:-kde}"
 
 # NVIDIA Wayland helpers (harmless on non-NVIDIA if libs absent)
 export GBM_BACKEND="${GBM_BACKEND:-nvidia-drm}"
@@ -26,6 +32,32 @@ if [[ -x /usr/lib/polkit-kde-authentication-agent-1 ]]; then
 elif [[ -x /usr/lib/polkit-kde-agent-1 ]]; then
   /usr/lib/polkit-kde-agent-1 &
 fi
+
+# Plasma 6.8 links KGlobalAccelD into KWin, so Meta+T is handled inside
+# kwin_wayland and there is no /usr/lib/kglobalacceld. Older Plasma still
+# ships that daemon; start it when the binary exists. Failure must not
+# abort the session.
+start_legacy_global_shortcuts() {
+  local bin="" candidate
+  for candidate in /usr/lib/kglobalacceld /usr/libexec/kglobalacceld; do
+    if [[ -x "$candidate" ]]; then
+      bin="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$bin" ]]; then
+    bin="$(command -v kglobalacceld 2>/dev/null || true)"
+  fi
+  if [[ -z "$bin" ]]; then
+    return 0
+  fi
+  if command -v pgrep >/dev/null 2>&1 && pgrep -x "$(basename "$bin")" >/dev/null 2>&1; then
+    return 0
+  fi
+  "$bin" >/dev/null 2>&1 &
+  echo "started $(basename "$bin") for global shortcuts" >&2
+}
+start_legacy_global_shortcuts || echo "warning: global shortcuts daemon failed to start" >&2
 
 # apollod = unified settings center daemon (Wi-Fi/BT/monitors/look/keybinds/exec)
 if command -v apollod >/dev/null 2>&1; then

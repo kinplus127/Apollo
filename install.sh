@@ -13,6 +13,164 @@ die()   { printf '%s error: %s\n' "$LOG_PREFIX" "$*" >&2; exit 1; }
 
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 
+# One sudo password for the whole install. The background refresh keeps the
+# timestamp alive across long pacman/yay builds. sudo -n -v never prompts
+# and stops if timestamp_timeout is 0.
+start_sudo_keepalive() {
+  while true; do
+    sudo -n -v || exit 0
+    sleep 50
+    kill -0 "$$" 2>/dev/null || exit 0
+  done
+}
+
+cleanup_sudo_keepalive() {
+  if [[ -n "${SUDO_KEEPALIVE_PID:-}" ]]; then
+    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    wait "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+  fi
+}
+
+apply_root_setup() {
+  local fish_bin="$1"
+  info "applying root setup once (login shell, session files, greetd, services)..."
+  sudo bash -s -- "$INSTALL_USER" "$ROOT" "$fish_bin" <<'EOS'
+set -euo pipefail
+user="$1"
+root="$2"
+fish_bin="$3"
+log() { printf '[apollo] %s\n' "$*"; }
+
+if [[ -n "$fish_bin" && -x "$fish_bin" ]]; then
+  if ! grep -qxF "$fish_bin" /etc/shells 2>/dev/null; then
+    log "adding $fish_bin to /etc/shells"
+    printf '%s\n' "$fish_bin" >>/etc/shells
+  fi
+  current="$(getent passwd "$user" | cut -d: -f7 || true)"
+  if [[ "$current" != "$fish_bin" ]]; then
+    log "setting login shell for $user → $fish_bin"
+    chsh -s "$fish_bin" "$user"
+  else
+    log "login shell already fish for $user"
+  fi
+fi
+
+if pacman -Q greetd-tuigreet >/dev/null 2>&1; then
+  log "removing greetd-tuigreet..."
+  pacman -Rns --noconfirm greetd-tuigreet || log "warning: could not remove greetd-tuigreet"
+fi
+if systemctl list-unit-files --no-legend 'sddm.service' 2>/dev/null | grep -q .; then
+  systemctl disable sddm.service >/dev/null 2>&1 || true
+  log "disabled sddm.service"
+fi
+
+share=/usr/local/share/apollo
+log "installing session scripts to $share"
+mkdir -p "$share/scripts" /usr/local/share/wayland-sessions /usr/local/bin \
+  /usr/local/share/applications /etc/greetd
+install -m 0755 "$root/scripts/start-apollo.sh" "$share/scripts/start-apollo.sh"
+install -m 0755 "$root/scripts/apollo-session" /usr/local/bin/apollo-session
+install -m 0755 "$root/scripts/apollo-lock.sh" "$share/scripts/apollo-lock.sh"
+install -m 0755 "$root/scripts/apollo-logout.sh" "$share/scripts/apollo-logout.sh"
+install -m 0755 "$root/scripts/apollo-theme-nt.sh" "$share/scripts/apollo-theme-nt.sh"
+install -m 0755 "$root/scripts/apollo-theme-nt.sh" /usr/local/bin/apollo-theme-nt
+install -m 0644 "$root/session/apollo.desktop" /usr/local/share/wayland-sessions/apollo.desktop
+install -m 0644 "$root/session/apollo-lock.desktop" /usr/local/share/applications/apollo-lock.desktop
+install -m 0644 "$root/session/apollo-logout.desktop" /usr/local/share/applications/apollo-logout.desktop
+install -m 0644 "$root/session/apollo-screenshot-region.desktop" /usr/local/share/applications/apollo-screenshot-region.desktop
+install -m 0644 "$root/session/apollo-screenshot-full.desktop" /usr/local/share/applications/apollo-screenshot-full.desktop
+rm -f /usr/local/bin/universe-kwin-session \
+  /usr/local/share/wayland-sessions/universe-kwin.desktop
+rm -rf /usr/local/share/universe-kwin
+
+cat >/etc/greetd/config.toml <<EOF
+[terminal]
+vt = 1
+
+# Boot straight into Apollo as ${user} — no greeter.
+[initial_session]
+command = "apollo-session"
+user = "${user}"
+
+# After logout / session exit, start Apollo again (still no greeter).
+[default_session]
+command = "apollo-session"
+user = "${user}"
+EOF
+
+log "enabling NetworkManager, bluetooth, greetd..."
+systemctl enable NetworkManager.service || log "warning: could not enable NetworkManager"
+systemctl enable bluetooth.service || log "warning: could not enable bluetooth"
+systemctl enable greetd.service
+EOS
+}
+
+# fish in kitty does not always inherit /usr/local/bin from greetd.
+install_fish_path() {
+  local dest="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d"
+  mkdir -p "$dest"
+  install -m 0644 "$ROOT/config/fish/conf.d/apollo.fish" "$dest/apollo.fish"
+  info "wrote $dest/apollo.fish (PATH includes /usr/local/bin and ~/.local/bin)"
+}
+
+# Session wrappers are root-owned. If that copy did not land, leave a
+# home-directory link so the command still exists, then abort: a missing
+# /usr/local/bin wrapper means the session install did not finish.
+require_theme_command() {
+  local system_bin="/usr/local/bin/apollo-theme-nt"
+  local user_bin="${HOME}/.local/bin"
+  local user_link="${user_bin}/apollo-theme-nt"
+  local src="$ROOT/scripts/apollo-theme-nt.sh"
+  local resolved
+
+  # /usr/local/bin first, so a leftover ~/.local/bin link cannot hide it.
+  PATH="/usr/local/bin:${user_bin}:${PATH}"
+  export PATH
+  hash -r || true
+
+  if [[ ! -x "$system_bin" ]]; then
+    if [[ ! -f "$src" ]]; then
+      die "this checkout has no scripts/apollo-theme-nt.sh. Check out the Apollo branch that adds the NT theme (or main after it is merged) and re-run ./install.sh."
+    fi
+    mkdir -p "$user_bin"
+    ln -sfn "$src" "$user_link"
+    chmod 0755 "$src" || true
+    die "test -x ${system_bin} failed. Session files were not installed (sudo failed, or this tree is older than the theme script). Fallback link: ${user_link}. Re-run ./install.sh from this directory. Then, in a new terminal: apollo-theme-nt status"
+  fi
+  resolved="$(command -v apollo-theme-nt || true)"
+  if [[ -z "$resolved" || ! -x "$resolved" ]]; then
+    die "command -v apollo-theme-nt failed. ${system_bin} exists but PATH does not find it (PATH=${PATH}). Open a new terminal, or re-run ./install.sh from this checkout."
+  fi
+  info "apollo-theme-nt is on PATH: ${resolved}"
+}
+
+require_nt_assets() {
+  local data="${XDG_DATA_HOME:-$HOME/.local/share}"
+  local missing=0 f
+  local -a need=(
+    "$data/aurorae/themes/NTLegacyWin98/metadata.desktop"
+    "$data/aurorae/themes/NTLegacyWin98/decoration.svg"
+    "$data/aurorae/themes/NTLegacyWin98/NTLegacyWin98rc"
+    "$data/aurorae/themes/NTLegacyWin98Nacht/metadata.desktop"
+    "$data/aurorae/themes/NTLegacyWin98Nacht/decoration.svg"
+    "$data/aurorae/themes/NTLegacyWin98Nacht/NTLegacyWin98Nachtrc"
+    "$data/color-schemes/NTLegacyWin98.colors"
+    "$data/color-schemes/NTLegacyWin98Nacht.colors"
+    "$data/icons/NTLegacyIcons/index.theme"
+    "$data/icons/NTLegacyIconsNacht/index.theme"
+  )
+  for f in "${need[@]}"; do
+    if [[ ! -e "$f" ]]; then
+      warn "missing NT asset: $f"
+      missing=1
+    fi
+  done
+  if [[ "$missing" -ne 0 ]]; then
+    die "NT Legacy assets are incomplete, so the theme cannot apply. Re-run ./install.sh from this checkout (it must contain scripts/apollo-theme-nt.sh). Then run: apollo-theme-nt status"
+  fi
+  info "NT Legacy assets are present under $data"
+}
+
 if [[ ${EUID:-0} -eq 0 ]]; then
   die "run as a normal user (script will call sudo). do not run as root."
 fi
@@ -25,9 +183,13 @@ if [[ ! -f /etc/arch-release ]]; then
   die "this installer targets Arch Linux (/etc/arch-release not found)"
 fi
 
-if ! sudo -n true 2>/dev/null; then
-  info "sudo password may be required"
-fi
+# Ask once. pacman, yay, greetd, and /usr/local reuse this timestamp.
+info "enter your sudo password once; later privileged steps reuse it"
+sudo -v
+SUDO_KEEPALIVE_PID=""
+trap cleanup_sudo_keepalive EXIT
+start_sudo_keepalive >/dev/null 2>&1 &
+SUDO_KEEPALIVE_PID=$!
 
 INSTALL_USER="${SUDO_USER:-$USER}"
 if [[ "$INSTALL_USER" == root ]] || [[ -z "$INSTALL_USER" ]]; then
@@ -39,6 +201,12 @@ PACMAN_PKGS=(
   kwin
   breeze
   breeze-icons
+  # Aurorae draws NT Legacy title bars. kwin already depends on it; listed
+  # so the decoration engine is not only a transitive dependency.
+  aurorae
+  # Qt platform theme: colours, icons, and widgetStyle from kdeglobals.
+  # This does not install plasmashell.
+  plasma-integration
   dbus
   kglobalaccel
   kglobalacceld
@@ -53,6 +221,9 @@ PACMAN_PKGS=(
   qt6-5compat
   pipewire
   wireplumber
+  # Pulse socket for pavucontrol-qt. Provides pulse-native-provider.
+  # Do not install pulseaudio.
+  pipewire-pulse
   greetd
   # NVIDIA: open kernel modules + userspace; VA-API via libva-nvidia-driver.
   # nvidia-utils already pulls egl-wayland / egl-gbm / libglvnd; Arch enables modeset.
@@ -72,6 +243,12 @@ PACMAN_PKGS=(
   cliphist
   wl-clip-persist
   spectacle
+  # Qt file manager. Dolphin's capacity bar ignores the Windows widget
+  # style; PCManFM-Qt follows it. The desktop module is OnlyShowIn=LXQt
+  # and does not start in an Apollo session.
+  pcmanfm-qt
+  # Qt PulseAudio mixer (pavucontrol-qt). No shell button yet.
+  pavucontrol-qt
   libnotify
   networkmanager
   bluez
@@ -86,39 +263,39 @@ PACMAN_PKGS=(
   fcitx5-mozc
   base-devel
   git
+  fontconfig
+  ttf-nerd-fonts-symbols
+  ttf-nerd-fonts-symbols-mono
+  gsettings-desktop-schemas
 )
-
-info "installing official packages..."
-sudo pacman -Syu --needed --noconfirm "${PACMAN_PKGS[@]}"
-
-# Drop greeters / display managers we do not want
-if pacman -Q greetd-tuigreet >/dev/null 2>&1; then
-  info "removing greetd-tuigreet..."
-  sudo pacman -Rns --noconfirm greetd-tuigreet || warn "could not remove greetd-tuigreet"
-fi
-if systemctl list-unit-files sddm.service >/dev/null 2>&1; then
-  sudo systemctl disable sddm.service 2>/dev/null || true
-  info "disabled sddm.service"
-fi
 
 # NVIDIA modeset: shipped by Arch nvidia-utils (no extra modprobe/mkinitcpio here).
 
-# --- fish as login shell for this account ---
-FISH_BIN="$(command -v fish)"
-if [[ -n "$FISH_BIN" ]]; then
-  if ! grep -qxF "$FISH_BIN" /etc/shells 2>/dev/null; then
-    info "adding $FISH_BIN to /etc/shells"
-    echo "$FISH_BIN" | sudo tee -a /etc/shells >/dev/null
-  fi
-  CURRENT_SHELL="$(getent passwd "$INSTALL_USER" | cut -d: -f7 || true)"
-  if [[ "$CURRENT_SHELL" != "$FISH_BIN" ]]; then
-    info "setting login shell for $INSTALL_USER → $FISH_BIN"
-    sudo chsh -s "$FISH_BIN" "$INSTALL_USER"
-  else
-    info "login shell already fish for $INSTALL_USER"
-  fi
+# awww replaced swww. pacman -Si does not need root. Do not ask the root
+# shell to write a user-owned temp file: a private /tmp rejects that, and
+# the whole install then stops before apollo-theme-nt is copied.
+info "installing official packages..."
+AWWW_FROM_OFFICIAL=0
+if pacman -Si awww >/dev/null 2>&1; then
+  PACMAN_PKGS+=(awww)
+  AWWW_FROM_OFFICIAL=1
+  info "awww is in the official repositories; including it in this pacman transaction"
 else
+  info "awww is not in the official repositories; will use AUR awww-git"
+fi
+sudo pacman -Syu --needed --noconfirm "${PACMAN_PKGS[@]}"
+
+# --- fish, session files, greetd, services: one root shell ---
+FISH_BIN="$(command -v fish || true)"
+if [[ -z "$FISH_BIN" ]]; then
   warn "fish binary not found after install"
+fi
+root_status=0
+apply_root_setup "$FISH_BIN" || root_status=$?
+install_fish_path
+require_theme_command
+if [[ "$root_status" -ne 0 ]]; then
+  die "root setup failed (exit ${root_status}). /usr/local session files may be incomplete. Re-run ./install.sh from this checkout."
 fi
 
 # --- AUR helper (yay) ---
@@ -136,21 +313,24 @@ install_yay() {
   (cd "$tmp/yay" && makepkg -si --noconfirm)
 }
 
+# Refresh the timestamp before builds. No prompt while the keepalive holds.
+sudo -v
+
 install_yay
 
-info "installing quickshell from AUR..."
-yay -S --needed --noconfirm quickshell
+AUR_PKGS=(quickshell brave-origin-bin ttf-apple-emoji)
+if [[ "$AWWW_FROM_OFFICIAL" -ne 1 ]]; then
+  info "awww is not in the official repositories; installing awww-git from AUR"
+  AUR_PKGS+=(awww-git)
+fi
+info "installing AUR packages: ${AUR_PKGS[*]}"
+yay -S --needed --noconfirm "${AUR_PKGS[@]}"
 
-info "installing brave-origin-bin (official Brave) from AUR..."
-yay -S --needed --noconfirm brave-origin-bin
-
-# --- wallpaper backend (awww; replaces swww — do not install swww) ---
-if pacman -Si awww >/dev/null 2>&1; then
-  info "installing awww from official repositories..."
-  sudo pacman -S --needed --noconfirm awww
-else
-  info "awww not in the official repositories; installing awww-git from AUR..."
-  yay -S --needed --noconfirm awww-git
+# KWin's shortcut service resolves kitty.desktop through the KService cache.
+# A missing cache is not fatal: ~/.local/share/kglobalaccel/kitty.desktop is
+# the fallback installed below.
+if command -v kbuildsycoca6 >/dev/null 2>&1; then
+  kbuildsycoca6 --noincremental >/dev/null 2>&1 || warn "kbuildsycoca6 failed; Meta+T still has the kglobalaccel kitty.desktop fallback"
 fi
 
 # --- fonts ---
@@ -363,16 +543,6 @@ apply_gsettings_fonts() {
   fi
 }
 
-info "installing fontconfig, Nerd Font symbols, and gsettings schemas..."
-sudo pacman -S --needed --noconfirm \
-  fontconfig \
-  ttf-nerd-fonts-symbols \
-  ttf-nerd-fonts-symbols-mono \
-  gsettings-desktop-schemas
-
-info "installing ttf-apple-emoji from AUR..."
-yay -S --needed --noconfirm ttf-apple-emoji
-
 install_ibm_plex
 install_noroshi
 
@@ -386,52 +556,19 @@ fi
 apply_font_configs
 apply_gsettings_fonts
 
-# --- install session files (Apollo brand) ---
-SHARE_DIR=/usr/local/share/apollo
-BIN_WRAPPER=/usr/local/bin/apollo-session
-DESKTOP_DST=/usr/local/share/wayland-sessions/apollo.desktop
-
-info "installing session scripts to $SHARE_DIR ..."
-sudo mkdir -p "$SHARE_DIR/scripts" /usr/local/share/wayland-sessions /usr/local/bin \
-  /usr/local/share/applications
-sudo install -m 0755 "$ROOT/scripts/start-apollo.sh" "$SHARE_DIR/scripts/start-apollo.sh"
-sudo install -m 0755 "$ROOT/scripts/apollo-session" "$BIN_WRAPPER"
-sudo install -m 0755 "$ROOT/scripts/apollo-lock.sh" "$SHARE_DIR/scripts/apollo-lock.sh"
-sudo install -m 0755 "$ROOT/scripts/apollo-logout.sh" "$SHARE_DIR/scripts/apollo-logout.sh"
-sudo install -m 0644 "$ROOT/session/apollo.desktop" "$DESKTOP_DST"
-sudo install -m 0644 "$ROOT/session/apollo-lock.desktop" /usr/local/share/applications/apollo-lock.desktop
-sudo install -m 0644 "$ROOT/session/apollo-logout.desktop" /usr/local/share/applications/apollo-logout.desktop
-sudo install -m 0644 "$ROOT/session/apollo-screenshot-region.desktop" /usr/local/share/applications/apollo-screenshot-region.desktop
-sudo install -m 0644 "$ROOT/session/apollo-screenshot-full.desktop" /usr/local/share/applications/apollo-screenshot-full.desktop
+# Session binaries and greetd were installed in apply_root_setup.
+# These desktop files are for the user session and stay unprivileged.
 USER_APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 mkdir -p "$USER_APP_DIR"
 install -m 0644 "$ROOT/session/apollo-lock.desktop" "$USER_APP_DIR/apollo-lock.desktop"
 install -m 0644 "$ROOT/session/apollo-logout.desktop" "$USER_APP_DIR/apollo-logout.desktop"
 install -m 0644 "$ROOT/session/apollo-screenshot-region.desktop" "$USER_APP_DIR/apollo-screenshot-region.desktop"
 install -m 0644 "$ROOT/session/apollo-screenshot-full.desktop" "$USER_APP_DIR/apollo-screenshot-full.desktop"
-
-# Remove old Universe-branded session if present
-sudo rm -f /usr/local/bin/universe-kwin-session \
-  /usr/local/share/wayland-sessions/universe-kwin.desktop
-sudo rm -rf /usr/local/share/universe-kwin
-
-# --- greetd: no greeter UI, autologin this account into Apollo ---
-info "configuring greetd autologin for $INSTALL_USER (no tuigreet)..."
-sudo mkdir -p /etc/greetd
-sudo tee /etc/greetd/config.toml >/dev/null <<GREETD
-[terminal]
-vt = 1
-
-# Boot straight into Apollo as ${INSTALL_USER} — no greeter.
-[initial_session]
-command = "apollo-session"
-user = "${INSTALL_USER}"
-
-# After logout / session exit, start Apollo again (still no greeter).
-[default_session]
-command = "apollo-session"
-user = "${INSTALL_USER}"
-GREETD
+# Resolved when KService does not know kitty.desktop yet. The component name
+# stays kitty.desktop, matching kglobalshortcutsrc.
+mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/kglobalaccel"
+install -m 0644 "$ROOT/session/kitty.desktop" \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/kglobalaccel/kitty.desktop"
 
 
 
@@ -463,8 +600,14 @@ if [[ -f "$KGSNIP" ]]; then
         printf '\n[kwin]\nWindow Close=Meta+Q\\tAlt+F4,Alt+F4,Close Window\n' >> "$KGSRC"
       fi
     fi
+    # KWin's compiled default for Edit Tiles is Meta+T. Write the key even
+    # when the file never had that line, or Meta+T stays on the tile editor.
     if grep -q '^Edit Tiles=' "$KGSRC"; then
       sed -i 's/^Edit Tiles=.*/Edit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling/' "$KGSRC"
+    elif grep -q '^\[kwin\]' "$KGSRC"; then
+      sed -i '/^\[kwin\]/a Edit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling' "$KGSRC"
+    else
+      printf '\n[kwin]\nEdit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling\n' >> "$KGSRC"
     fi
     if ! grep -q '\[services\]\[kitty.desktop\]' "$KGSRC"; then
       printf '\n[services][kitty.desktop]\n_k_friendly_name=kitty\n_launch=Meta+T,none,Launch kitty\n' >> "$KGSRC"
@@ -535,20 +678,40 @@ else
   info "keep existing $FCITX_DIR/profile"
 fi
 
+# Assets first, so a new kwinrc never points at a missing Aurorae theme.
+info "installing NT Legacy 98 (win98 / win98-nacht) assets..."
+"$ROOT/scripts/apollo-theme-nt.sh" fetch
+require_nt_assets
+
 KWINRC="${XDG_CONFIG_HOME:-$HOME/.config}/kwinrc"
 mkdir -p "$(dirname "$KWINRC")"
 if [[ ! -f "$KWINRC" ]]; then
   install -m 0644 "$ROOT/config/kwin/kwinrc.snippet" "$KWINRC"
   info "wrote $KWINRC"
 else
-  info "keep existing $KWINRC (not overwriting)"
+  info "keep existing $KWINRC (decoration keys are still updated by apollo-theme-nt)"
 fi
 
-# --- services ---
-info "enabling NetworkManager, bluetooth, greetd..."
-sudo systemctl enable NetworkManager.service || warn "could not enable NetworkManager"
-sudo systemctl enable bluetooth.service || warn "could not enable bluetooth"
-sudo systemctl enable greetd.service
+# Re-apply the variant already chosen so a newer script can fill in colour
+# groups and the decoration keys. This does not switch night back to day.
+NT_APPLIED="${XDG_DATA_HOME:-$HOME/.local/share}/apollo/nt-legacy/applied"
+nt_variant="day"
+if [[ -f "$NT_APPLIED" ]]; then
+  nt_variant="$(<"$NT_APPLIED")"
+fi
+case "$nt_variant" in
+  day|night)
+    info "applying NT Legacy 98 ($nt_variant)"
+    "$ROOT/scripts/apollo-theme-nt.sh" "$nt_variant"
+    ;;
+  *)
+    warn "invalid NT Legacy marker ($nt_variant); applying day"
+    "$ROOT/scripts/apollo-theme-nt.sh" day
+    ;;
+esac
+"$ROOT/scripts/apollo-theme-nt.sh" ensure-file-manager
+require_theme_command
+require_nt_assets
 
 cat <<DONE
 
@@ -556,7 +719,9 @@ cat <<DONE
 Apollo install finished.
 
 Installed / configured:
-  - Apollo DE: KWin + Breeze + Quickshell (no plasmashell)
+  - Apollo DE: KWin + Quickshell + NT Legacy 98 (no plasmashell)
+  - pcmanfm-qt (file manager), pavucontrol-qt (volume mixer)
+  - theme switch: apollo-theme-nt day | night | toggle | status
   - NVIDIA: nvidia-open + nvidia-utils + libva-nvidia-driver
   - greetd autologin as ${INSTALL_USER} (NO greeter / NO tuigreet / NO SDDM)
   - fish as login shell for ${INSTALL_USER}
@@ -569,11 +734,25 @@ Installed / configured:
   - cliphist + wl-clip-persist (clipboard history; regular clipboard survives app exit)
   - NetworkManager + BlueZ
 
+This ./install.sh must come from the checkout that contains
+scripts/apollo-theme-nt.sh (this branch, or main after it is merged).
+An older tree does not install the command. fish then says:
+  Unknown command: apollo-theme-nt
+
+Check in a new terminal (fish reads PATH from ~/.config/fish/conf.d):
+  command -v apollo-theme-nt
+  apollo-theme-nt status
+If that still fails, re-run ./install.sh from this directory.
+
 Next:
   1) reboot → should land in Apollo automatically
   2) wallpapers: ~/Pictures/wallpapers/ (awww picks one at login)
   3) edit shell:  ~/.config/quickshell/apollo/shell.qml
   4) edit kwin:   ~/.config/kwinrc
+  5) theme:      apollo-theme-nt day | night | toggle
+     Colours are copied into ~/.config/kdeglobals. Log out once if the
+     title bar or colours stay on the previous look.
+     Volume: pavucontrol-qt   Files: pcmanfm-qt
 
 NVIDIA:
   - modeset comes from Arch's nvidia-utils; egl-wayland is a dep of nvidia-utils
