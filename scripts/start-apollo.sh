@@ -7,6 +7,8 @@ export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-Apollo}"
 export XDG_SESSION_TYPE=wayland
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 export QT_WAYLAND_DISABLE_WINDOWDECORATION=0
+# plasma-integration reads kdeglobals (NT colours, icons, Windows widget style).
+export QT_QPA_PLATFORMTHEME="${QT_QPA_PLATFORMTHEME:-kde}"
 
 # NVIDIA Wayland helpers (harmless on non-NVIDIA if libs absent)
 export GBM_BACKEND="${GBM_BACKEND:-nvidia-drm}"

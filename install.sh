@@ -39,6 +39,12 @@ PACMAN_PKGS=(
   kwin
   breeze
   breeze-icons
+  # Aurorae draws NT Legacy title bars. kwin already depends on it; listed
+  # so the decoration engine is not only a transitive dependency.
+  aurorae
+  # Qt platform theme: colours, icons, and widgetStyle from kdeglobals.
+  # This does not install plasmashell.
+  plasma-integration
   dbus
   kglobalaccel
   kglobalacceld
@@ -53,6 +59,9 @@ PACMAN_PKGS=(
   qt6-5compat
   pipewire
   wireplumber
+  # Pulse socket for pavucontrol-qt. Provides pulse-native-provider.
+  # Do not install pulseaudio.
+  pipewire-pulse
   greetd
   # NVIDIA: open kernel modules + userspace; VA-API via libva-nvidia-driver.
   # nvidia-utils already pulls egl-wayland / egl-gbm / libglvnd; Arch enables modeset.
@@ -72,6 +81,12 @@ PACMAN_PKGS=(
   cliphist
   wl-clip-persist
   spectacle
+  # Qt file manager. Dolphin's capacity bar ignores the Windows widget
+  # style; PCManFM-Qt follows it. The desktop module is OnlyShowIn=LXQt
+  # and does not start in an Apollo session.
+  pcmanfm-qt
+  # Qt PulseAudio mixer (pavucontrol-qt). No shell button yet.
+  pavucontrol-qt
   libnotify
   networkmanager
   bluez
@@ -398,6 +413,8 @@ sudo install -m 0755 "$ROOT/scripts/start-apollo.sh" "$SHARE_DIR/scripts/start-a
 sudo install -m 0755 "$ROOT/scripts/apollo-session" "$BIN_WRAPPER"
 sudo install -m 0755 "$ROOT/scripts/apollo-lock.sh" "$SHARE_DIR/scripts/apollo-lock.sh"
 sudo install -m 0755 "$ROOT/scripts/apollo-logout.sh" "$SHARE_DIR/scripts/apollo-logout.sh"
+sudo install -m 0755 "$ROOT/scripts/apollo-theme-nt.sh" "$SHARE_DIR/scripts/apollo-theme-nt.sh"
+sudo install -m 0755 "$ROOT/scripts/apollo-theme-nt.sh" /usr/local/bin/apollo-theme-nt
 sudo install -m 0644 "$ROOT/session/apollo.desktop" "$DESKTOP_DST"
 sudo install -m 0644 "$ROOT/session/apollo-lock.desktop" /usr/local/share/applications/apollo-lock.desktop
 sudo install -m 0644 "$ROOT/session/apollo-logout.desktop" /usr/local/share/applications/apollo-logout.desktop
@@ -535,14 +552,41 @@ else
   info "keep existing $FCITX_DIR/profile"
 fi
 
+# Assets first, so a new kwinrc never points at a missing Aurorae theme.
+info "installing NT Legacy 98 (win98 / win98-nacht) assets..."
+"$ROOT/scripts/apollo-theme-nt.sh" fetch
+
 KWINRC="${XDG_CONFIG_HOME:-$HOME/.config}/kwinrc"
+kwin_created=0
 mkdir -p "$(dirname "$KWINRC")"
 if [[ ! -f "$KWINRC" ]]; then
   install -m 0644 "$ROOT/config/kwin/kwinrc.snippet" "$KWINRC"
+  kwin_created=1
   info "wrote $KWINRC"
 else
   info "keep existing $KWINRC (not overwriting)"
 fi
+
+NT_APPLIED="${XDG_DATA_HOME:-$HOME/.local/share}/apollo/nt-legacy/applied"
+if [[ ! -f "$NT_APPLIED" ]]; then
+  info "applying NT Legacy 98 day theme"
+  "$ROOT/scripts/apollo-theme-nt.sh" day
+elif [[ "$kwin_created" -eq 1 ]]; then
+  nt_variant="$(<"$NT_APPLIED")"
+  case "$nt_variant" in
+    day|night)
+      info "restoring NT Legacy variant ($nt_variant) into new kwinrc"
+      "$ROOT/scripts/apollo-theme-nt.sh" "$nt_variant"
+      ;;
+    *)
+      warn "invalid NT Legacy marker ($nt_variant); applying day"
+      "$ROOT/scripts/apollo-theme-nt.sh" day
+      ;;
+  esac
+else
+  info "NT Legacy variant already chosen ($(<"$NT_APPLIED")); not switching"
+fi
+"$ROOT/scripts/apollo-theme-nt.sh" ensure-file-manager
 
 # --- services ---
 info "enabling NetworkManager, bluetooth, greetd..."
@@ -556,7 +600,9 @@ cat <<DONE
 Apollo install finished.
 
 Installed / configured:
-  - Apollo DE: KWin + Breeze + Quickshell (no plasmashell)
+  - Apollo DE: KWin + Quickshell + NT Legacy 98 (no plasmashell)
+  - pcmanfm-qt (file manager), pavucontrol-qt (volume mixer)
+  - theme switch: apollo-theme-nt day | night | toggle | status
   - NVIDIA: nvidia-open + nvidia-utils + libva-nvidia-driver
   - greetd autologin as ${INSTALL_USER} (NO greeter / NO tuigreet / NO SDDM)
   - fish as login shell for ${INSTALL_USER}
@@ -574,6 +620,9 @@ Next:
   2) wallpapers: ~/Pictures/wallpapers/ (awww picks one at login)
   3) edit shell:  ~/.config/quickshell/apollo/shell.qml
   4) edit kwin:   ~/.config/kwinrc
+  5) theme:      apollo-theme-nt day | night | toggle
+     Aurorae title bars load when KWin starts. Log out once if the frame stays old.
+     Volume: pavucontrol-qt   Files: pcmanfm-qt
 
 NVIDIA:
   - modeset comes from Arch's nvidia-utils; egl-wayland is a dep of nvidia-utils

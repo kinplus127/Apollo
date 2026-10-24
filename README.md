@@ -3,7 +3,9 @@
 Minimal **Arch Linux** desktop environment:
 
 - **KWin** (Wayland compositor + title bars / decorations) and **breeze-icons**
+- **NT Legacy 98** day/night title bars, colours, and icons (Qt Windows widget style; no `plasmashell`)
 - **Quickshell** (bar / shell UI — no `plasmashell`)
+- **PCManFM-Qt** file manager and **pavucontrol-qt** volume mixer
 - **greetd** autologin (no greeter UI — not tuigreet / SDDM)
 - **fish** as the account login shell
 - **fcitx5** — 速成 (Quick3) and 日本語 Mozc (ローマ字)
@@ -42,13 +44,17 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 | `/etc/greetd/config.toml` | autologin into Apollo (no greeter) |
 | `~/.config/quickshell/apollo/shell.qml` | stub bar and notification toasts |
 | `~/Pictures/wallpapers/` | default wallpapers; awww picks one at login |
-| `~/.config/kwinrc` | created only if missing |
+| `~/.config/kwinrc` | created only if missing; decoration keys follow NT Legacy |
+| `/usr/local/bin/apollo-theme-nt` | NT Legacy 98 day/night switch (`toggle` is the future Quickshell hook) |
+| `~/.local/share/aurorae/themes/` | NT Legacy 98 and 98 Night window decorations |
+| `~/.local/share/color-schemes/NTLegacyWin98*.colors` | matching colour schemes |
+| `~/.local/share/icons/NTLegacyIcons/` | NT icons; `NTLegacyIconsNacht` is derived at install |
 | `~/.local/share/fonts/ibm-plex/` | IBM Plex desktop OTF |
 | `~/.local/share/fonts/noroshi/` | Noroshi Code hinted TTF |
 
 ## Re-run
 
-`./install.sh` is idempotent for user configs: existing `shell.qml` / `kwinrc` are kept.
+`./install.sh` does not replace an existing `shell.qml` or `kwinrc`. The first NT Legacy install applies the **day** theme once (decoration, colours, icons, and the Windows widget style together). Later runs refresh upstream assets when that git revision moves, and leave the chosen day or night variant in place.
 
 ## Default keybinds (installed)
 
@@ -106,7 +112,47 @@ Defaults are written to:
 - Qt / KDE `~/.config/kdeglobals`
 - kitty `font_family Noroshi Code`
 
-Re-run updates those font keys and leaves other kitty, GTK, and `kdeglobals` settings in place. `shell.qml` and `kwinrc` are still left untouched when they already exist.
+Re-run updates those font keys and leaves other kitty, GTK, and `kdeglobals` settings in place. `shell.qml` is left untouched when it already exists. An existing `kwinrc` is not replaced wholesale; NT Legacy only updates its decoration keys when the day theme is applied for the first time, or when a missing `kwinrc` is recreated.
+
+## NT Legacy 98（Windows 98 配色）
+
+Apollo 只安裝標題列與 Qt 程式需要的層次，並以日間 **win98**、夜間 **win98-nacht** 成對切換。不安裝 Plasma 面板、Look and Feel／Global Theme，亦不依賴 `plasmashell`。上游的 GRUB、Plymouth、游標、Konsole 色彩及牆紙故意略去。
+
+來源是 [huppiflupp/plasma-theme-lab](https://github.com/huppiflupp/plasma-theme-lab) 的 `nt-legacy/`（GPL-2.0-or-later）。`install.sh` 以 sparse checkout 取得資產，做法與字型相同：記錄上游 commit，修訂變動時才重新下載。夜間圖示上游沒有入庫，安裝時由日間圖示派生，只把繼承鏈改為 Breeze Dark。
+
+已安裝的層次：
+
+| 層次 | 日間 | 夜間 |
+|---|---|---|
+| Aurorae 標題列 | `NTLegacyWin98` | `NTLegacyWin98Nacht` |
+| 色彩方案 | `NTLegacyWin98` | `NTLegacyWin98Nacht` |
+| 圖示 | `NTLegacyIcons`（繼承 Breeze） | `NTLegacyIconsNacht`（繼承 Breeze Dark） |
+| Qt 控制項 | `widgetStyle=Windows`（Qt 內建 Windows 9x 樣式，不用 Kvantum） | 同左 |
+
+`start-apollo.sh` 設定 `QT_QPA_PLATFORMTHEME=kde`，由 `plasma-integration` 讀取 `kdeglobals`。此套件不是 `plasmashell`。
+
+切換（四層同時寫入；Quickshell 日後可呼叫 `toggle`，目前沒有按鈕）：
+
+```bash
+apollo-theme-nt day
+apollo-theme-nt night
+apollo-theme-nt toggle
+apollo-theme-nt status
+```
+
+`status` 印出 `variant=`、`coherent=` 及各層名稱。`toggle` 在日間與夜間之間對調；若設定混雜或尚未套用，則改為日間。
+
+Aurorae 標題列在 KWin 啟動時載入。腳本會通知 KWin 重新讀取設定；若標題列未變，請登出再登入一次。已開啟的 Qt 程式可能要重新開啟，才會使用新的色彩、圖示與 Windows 控制項樣式。
+
+### 檔案總管與音量
+
+**PCManFM-Qt**（`pcmanfm-qt`）用作檔案總管：Dolphin 的剩餘空間列往往不理會 Windows widget style。套用主題時會把 PCManFM-Qt 的 `IconThemeName` 與 `FallbackIconThemeName` 設成目前的 NT 圖示。其桌面模組（`pcmanfm-qt --desktop`）的 autostart 標明 `OnlyShowIn=LXQt`，Apollo 工作階段不會啟動它。
+
+`inode/directory` 只在 `~/.config/mimeapps.list` 尚未指定時設為 `pcmanfm-qt.desktop`。還原方法：刪去 `[Default Applications]` 下該行。已有其他檔案總管時，安裝程式不會覆寫。
+
+**pavucontrol-qt** 是 Qt 版 PulseAudio 音量控制，只加入安裝清單，沒有 Quickshell 按鈕。它需要 Pulse 插座；Apollo 安裝 `pipewire-pulse`（不要另外安裝 `pulseaudio`）。啟動指令是 `pavucontrol-qt`。
+
+English: the same pair is what `apollo-theme-nt` writes. Panels, Global Theme, GRUB, and Plymouth from upstream are omitted on purpose. Log out once if the title bar does not follow a switch. A future Quickshell button should call `apollo-theme-nt toggle` and does not exist yet.
 
 ## Wallpaper
 
