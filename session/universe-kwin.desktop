@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Universe (KWin + Quickshell)
+Comment=KWin Wayland without plasmashell; Quickshell as the desktop shell
+Exec=universe-kwin-session
+TryExec=kwin_wayland
+Type=Application
+DesktopNames=Universe;KDE
