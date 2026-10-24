@@ -5,6 +5,10 @@ set -euo pipefail
 export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-Apollo:KDE}"
 export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-Apollo}"
 export XDG_SESSION_TYPE=wayland
+# greetd's PATH can omit /usr/local/bin. kitty then starts fish without
+# apollo-theme-nt on PATH ("Unknown command", exit 127).
+PATH="/usr/local/bin:${HOME}/.local/bin:${PATH}"
+export PATH
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 export QT_WAYLAND_DISABLE_WINDOWDECORATION=0
 # plasma-integration reads kdeglobals (NT colours, icons, Windows widget style).

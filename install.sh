@@ -105,6 +105,72 @@ systemctl enable greetd.service
 EOS
 }
 
+# fish in kitty does not always inherit /usr/local/bin from greetd.
+install_fish_path() {
+  local dest="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d"
+  mkdir -p "$dest"
+  install -m 0644 "$ROOT/config/fish/conf.d/apollo.fish" "$dest/apollo.fish"
+  info "wrote $dest/apollo.fish (PATH includes /usr/local/bin and ~/.local/bin)"
+}
+
+# Session wrappers are root-owned. If that copy did not land, leave a
+# home-directory link so the command still exists, then abort: a missing
+# /usr/local/bin wrapper means the session install did not finish.
+require_theme_command() {
+  local system_bin="/usr/local/bin/apollo-theme-nt"
+  local user_bin="${HOME}/.local/bin"
+  local user_link="${user_bin}/apollo-theme-nt"
+  local src="$ROOT/scripts/apollo-theme-nt.sh"
+  local resolved
+
+  # /usr/local/bin first, so a leftover ~/.local/bin link cannot hide it.
+  PATH="/usr/local/bin:${user_bin}:${PATH}"
+  export PATH
+  hash -r || true
+
+  if [[ ! -x "$system_bin" ]]; then
+    if [[ ! -f "$src" ]]; then
+      die "this checkout has no scripts/apollo-theme-nt.sh. Check out the Apollo branch that adds the NT theme (or main after it is merged) and re-run ./install.sh."
+    fi
+    mkdir -p "$user_bin"
+    ln -sfn "$src" "$user_link"
+    chmod 0755 "$src" || true
+    die "test -x ${system_bin} failed. Session files were not installed (sudo failed, or this tree is older than the theme script). Fallback link: ${user_link}. Re-run ./install.sh from this directory. Then, in a new terminal: apollo-theme-nt status"
+  fi
+  resolved="$(command -v apollo-theme-nt || true)"
+  if [[ -z "$resolved" || ! -x "$resolved" ]]; then
+    die "command -v apollo-theme-nt failed. ${system_bin} exists but PATH does not find it (PATH=${PATH}). Open a new terminal, or re-run ./install.sh from this checkout."
+  fi
+  info "apollo-theme-nt is on PATH: ${resolved}"
+}
+
+require_nt_assets() {
+  local data="${XDG_DATA_HOME:-$HOME/.local/share}"
+  local missing=0 f
+  local -a need=(
+    "$data/aurorae/themes/NTLegacyWin98/metadata.desktop"
+    "$data/aurorae/themes/NTLegacyWin98/decoration.svg"
+    "$data/aurorae/themes/NTLegacyWin98/NTLegacyWin98rc"
+    "$data/aurorae/themes/NTLegacyWin98Nacht/metadata.desktop"
+    "$data/aurorae/themes/NTLegacyWin98Nacht/decoration.svg"
+    "$data/aurorae/themes/NTLegacyWin98Nacht/NTLegacyWin98Nachtrc"
+    "$data/color-schemes/NTLegacyWin98.colors"
+    "$data/color-schemes/NTLegacyWin98Nacht.colors"
+    "$data/icons/NTLegacyIcons/index.theme"
+    "$data/icons/NTLegacyIconsNacht/index.theme"
+  )
+  for f in "${need[@]}"; do
+    if [[ ! -e "$f" ]]; then
+      warn "missing NT asset: $f"
+      missing=1
+    fi
+  done
+  if [[ "$missing" -ne 0 ]]; then
+    die "NT Legacy assets are incomplete, so the theme cannot apply. Re-run ./install.sh from this checkout (it must contain scripts/apollo-theme-nt.sh). Then run: apollo-theme-nt status"
+  fi
+  info "NT Legacy assets are present under $data"
+}
+
 if [[ ${EUID:-0} -eq 0 ]]; then
   die "run as a normal user (script will call sudo). do not run as root."
 fi
@@ -224,9 +290,12 @@ FISH_BIN="$(command -v fish || true)"
 if [[ -z "$FISH_BIN" ]]; then
   warn "fish binary not found after install"
 fi
-apply_root_setup "$FISH_BIN"
-if [[ ! -x /usr/local/bin/apollo-theme-nt ]]; then
-  die "apollo-theme-nt is not executable at /usr/local/bin/apollo-theme-nt (session files were not installed)"
+root_status=0
+apply_root_setup "$FISH_BIN" || root_status=$?
+install_fish_path
+require_theme_command
+if [[ "$root_status" -ne 0 ]]; then
+  die "root setup failed (exit ${root_status}). /usr/local session files may be incomplete. Re-run ./install.sh from this checkout."
 fi
 
 # --- AUR helper (yay) ---
@@ -612,6 +681,7 @@ fi
 # Assets first, so a new kwinrc never points at a missing Aurorae theme.
 info "installing NT Legacy 98 (win98 / win98-nacht) assets..."
 "$ROOT/scripts/apollo-theme-nt.sh" fetch
+require_nt_assets
 
 KWINRC="${XDG_CONFIG_HOME:-$HOME/.config}/kwinrc"
 mkdir -p "$(dirname "$KWINRC")"
@@ -640,6 +710,8 @@ case "$nt_variant" in
     ;;
 esac
 "$ROOT/scripts/apollo-theme-nt.sh" ensure-file-manager
+require_theme_command
+require_nt_assets
 
 cat <<DONE
 
@@ -661,6 +733,16 @@ Installed / configured:
   - Spectacle: Super+C region, Super+Shift+C full screen
   - cliphist + wl-clip-persist (clipboard history; regular clipboard survives app exit)
   - NetworkManager + BlueZ
+
+This ./install.sh must come from the checkout that contains
+scripts/apollo-theme-nt.sh (this branch, or main after it is merged).
+An older tree does not install the command. fish then says:
+  Unknown command: apollo-theme-nt
+
+Check in a new terminal (fish reads PATH from ~/.config/fish/conf.d):
+  command -v apollo-theme-nt
+  apollo-theme-nt status
+If that still fails, re-run ./install.sh from this directory.
 
 Next:
   1) reboot → should land in Apollo automatically

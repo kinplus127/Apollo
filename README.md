@@ -24,11 +24,30 @@ Minimal **Arch Linux** desktop environment:
 sudo pacman -Syu --needed git base-devel
 git clone https://github.com/kinplus127/Apollo.git ~/Apollo
 cd ~/Apollo
+# This checkout must contain scripts/apollo-theme-nt.sh.
+# Use this branch, or main after that change is merged. An older tree
+# finishes without the theme command.
 ./install.sh
 sudo reboot
 ```
 
 After reboot, greetd starts **Apollo** as the installing user with no login screen.
+
+`apollo-theme-nt` is installed only by that `./install.sh`. If fish in kitty says `Unknown command: apollo-theme-nt` (exit 127), the command was never copied to `/usr/local/bin` — the install stopped early, or the checkout is older than the theme script. Open a new terminal after a finished install and run:
+
+```bash
+command -v apollo-theme-nt
+apollo-theme-nt status
+```
+
+`command -v` should print `/usr/local/bin/apollo-theme-nt`. fish also reads `~/.config/fish/conf.d/apollo.fish`, which adds `/usr/local/bin` and `~/.local/bin` to `PATH`. If `/usr/local/bin` could not be written, the installer leaves `~/.local/bin/apollo-theme-nt` and then stops.
+
+`apollo-theme-nt` 只會由這份 `./install.sh` 裝上。fish 若顯示 `Unknown command: apollo-theme-nt`（結束碼 127），代表 `/usr/local/bin` 沒有這個指令：安裝提早中止，或這個目錄還是舊的程式樹。請改用包含 `scripts/apollo-theme-nt.sh` 的分支（合併後則用 `main`），在該目錄再執行 `./install.sh`。完成後開一個新終端機：
+
+```bash
+command -v apollo-theme-nt
+apollo-theme-nt status
+```
 
 `./install.sh` asks for the sudo password **once**. Package installs, greetd, and files under `/usr/local` reuse that authentication, including across long builds. Fonts, the NT Legacy theme, and everything under your home directory do not use sudo. `sudo reboot` afterwards is a separate command.
 
@@ -49,7 +68,9 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 | `~/.config/quickshell/apollo/shell.qml` | stub bar and notification toasts |
 | `~/Pictures/wallpapers/` | default wallpapers; awww picks one at login |
 | `~/.config/kwinrc` | created only if missing; decoration keys follow NT Legacy |
-| `/usr/local/bin/apollo-theme-nt` | NT Legacy 98 day/night switch (`toggle` is the future Quickshell hook) |
+| `/usr/local/bin/apollo-theme-nt` | NT Legacy 98 day/night switch (`toggle` is the future Quickshell hook). Missing when install stops early |
+| `~/.local/bin/apollo-theme-nt` | Fallback link only if `/usr/local/bin` could not be written; install then stops |
+| `~/.config/fish/conf.d/apollo.fish` | Puts `/usr/local/bin` and `~/.local/bin` on fish's `PATH` |
 | `~/.local/share/aurorae/themes/` | NT Legacy 98 and 98 Night window decorations |
 | `~/.local/share/color-schemes/NTLegacyWin98*.colors` | matching colour schemes |
 | `~/.local/share/icons/NTLegacyIcons/` | NT icons; `NTLegacyIconsNacht` is derived at install |
@@ -116,7 +137,7 @@ Defaults are written to:
 - Qt / KDE `~/.config/kdeglobals`
 - kitty `font_family Noroshi Code`
 
-Re-run updates those font keys and leaves other kitty, GTK, and `kdeglobals` settings in place. `shell.qml` is left untouched when it already exists. An existing `kwinrc` is not replaced wholesale; NT Legacy only updates its decoration keys when the day theme is applied for the first time, or when a missing `kwinrc` is recreated.
+Re-run updates those font keys and leaves other kitty, GTK, and `kdeglobals` settings in place. `shell.qml` is left untouched when it already exists. An existing `kwinrc` is not replaced wholesale. Each run still writes the NT decoration keys and colour groups for the variant already chosen.
 
 ## NT Legacy 98（Windows 98 配色）
 
