@@ -34,6 +34,7 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 | `/usr/local/share/wayland-sessions/apollo.desktop` | session desktop file |
 | `/etc/greetd/config.toml` | autologin into Apollo (no greeter) |
 | `~/.config/quickshell/apollo/shell.qml` | stub bar |
+| `~/Pictures/wallpapers/` | default wallpapers (exact copy from repo) |
 | `~/.config/kwinrc` | created only if missing |
 
 ## Re-run

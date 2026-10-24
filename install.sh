@@ -154,6 +154,22 @@ command = "apollo-session"
 user = "${INSTALL_USER}"
 GREETD
 
+
+# --- wallpapers (pixel-perfect copy, no recompress) ---
+WP_SRC="$ROOT/wallpapers"
+WP_DST="${XDG_PICTURES_DIR:-$HOME/Pictures}/wallpapers"
+if [[ -d "$WP_SRC" ]]; then
+  info "installing wallpapers → $WP_DST (exact copy)"
+  mkdir -p "$WP_DST"
+  # -p preserve mode/times; no convert/resize
+  find "$WP_SRC" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) -print0 |
+    while IFS= read -r -d '' f; do
+      install -m 0644 "$f" "$WP_DST/$(basename "$f")"
+    done
+else
+  warn "no wallpapers/ directory in repo"
+fi
+
 # --- user config (idempotent) ---
 QS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/apollo"
 mkdir -p "$QS_DIR"
@@ -199,8 +215,9 @@ Installed / configured:
 
 Next:
   1) reboot → should land in Apollo automatically
-  2) edit shell:  ~/.config/quickshell/apollo/shell.qml
-  3) edit kwin:   ~/.config/kwinrc
+  2) wallpapers: ~/Pictures/wallpapers/
+  3) edit shell:  ~/.config/quickshell/apollo/shell.qml
+  4) edit kwin:   ~/.config/kwinrc
 
 NVIDIA:
   - modeset comes from Arch's nvidia-utils; egl-wayland is a dep of nvidia-utils
