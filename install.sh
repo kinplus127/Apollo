@@ -131,6 +131,239 @@ yay -S --needed --noconfirm quickshell
 info "installing brave-origin-bin (official Brave) from AUR..."
 yay -S --needed --noconfirm brave-origin-bin
 
+# --- fonts ---
+# IBM Plex release zips mix in woff/woff2, so copy desktop OTF only
+# (fonts/complete/otf, hinted when CJK splits hinted/unhinted).
+# Noroshi has no release assets; use hinted TTF (upstream prefers TTF over OTF).
+
+has_font_file() {
+  local dir="$1" ext="$2" found
+  found="$(find "$dir" -type f -name "*.${ext}" -print -quit 2>/dev/null || true)"
+  [[ -n "$found" ]]
+}
+
+copy_desktop_fonts() {
+  local src="$1" dest="$2" ext="$3"
+  local f count=0
+  mkdir -p "$dest"
+  while IFS= read -r -d '' f; do
+    install -m 0644 "$f" "$dest/$(basename "$f")"
+    count=$((count + 1))
+  done < <(find "$src" -maxdepth 1 -type f -iname "*.${ext}" -print0)
+  [[ "$count" -gt 0 ]] || die "no ${ext} files in $src"
+  info "copied ${count} ${ext} → $dest"
+}
+
+reject_web_fonts() {
+  local dir="$1" found
+  found="$(find "$dir" -type f \( -iname '*.woff' -o -iname '*.woff2' -o -iname '*.eot' \) -print -quit 2>/dev/null || true)"
+  [[ -z "$found" ]] || die "refusing web font in $dir ($found)"
+}
+
+install_ibm_plex() {
+  (
+    local tmp dest stamp rev dir pkg
+    local -a plex_font_dirs
+    tmp="$(mktemp -d)"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmp'" EXIT
+    dest="${XDG_DATA_HOME:-$HOME/.local/share}/fonts/ibm-plex"
+    rev="$(GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/IBM/plex.git HEAD | awk 'NR==1 { print $1 }')"
+    [[ -n "$rev" ]] || die "could not resolve IBM Plex HEAD"
+    stamp="$dest/.apollo-source"
+    if [[ -f "$stamp" && "$(<"$stamp")" == "$rev" ]] && has_font_file "$dest" otf; then
+      info "IBM Plex desktop fonts already present ($rev)"
+      exit 0
+    fi
+    info "installing IBM Plex desktop OTF from GitHub..."
+    plex_font_dirs=(
+      packages/plex-sans/fonts/complete/otf
+      packages/plex-serif/fonts/complete/otf
+      packages/plex-mono/fonts/complete/otf
+      packages/plex-sans-condensed/fonts/complete/otf
+      packages/plex-sans-jp/fonts/complete/otf/hinted
+      packages/plex-sans-kr/fonts/complete/otf
+      packages/plex-sans-sc/fonts/complete/otf/hinted
+      packages/plex-sans-tc/fonts/complete/otf/hinted
+      packages/plex-sans-arabic/fonts/complete/otf
+      packages/plex-sans-hebrew/fonts/complete/otf
+      packages/plex-sans-devanagari/fonts/complete/otf
+      packages/plex-sans-thai/fonts/complete/otf
+      packages/plex-sans-thai-looped/fonts/complete/otf
+      packages/plex-math/fonts/complete/otf
+    )
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 --filter=blob:none --sparse \
+      https://github.com/IBM/plex.git "$tmp/plex"
+    git -C "$tmp/plex" sparse-checkout set --cone "${plex_font_dirs[@]}"
+    rm -rf "$dest"
+    mkdir -p "$dest"
+    for dir in "${plex_font_dirs[@]}"; do
+      pkg="${dir#packages/}"
+      pkg="${pkg%%/*}"
+      copy_desktop_fonts "$tmp/plex/$dir" "$dest/$pkg" otf
+    done
+    reject_web_fonts "$dest"
+    printf '%s\n' "$rev" >"$stamp"
+    info "IBM Plex installed → $dest ($rev)"
+  )
+}
+
+install_noroshi() {
+  (
+    local tmp dest stamp tag
+    tmp="$(mktemp -d)"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmp'" EXIT
+    dest="${XDG_DATA_HOME:-$HOME/.local/share}/fonts/noroshi"
+    tag="$(
+      GIT_TERMINAL_PROMPT=0 git ls-remote --tags --refs https://github.com/Honoka55/noroshi.git \
+        | awk -F/ '{ print $NF }' \
+        | grep -E '^v[0-9]+\.[0-9]+' \
+        | sort -V \
+        | tail -n 1 \
+        || true
+    )"
+    [[ -n "$tag" ]] || die "could not resolve Noroshi release tag"
+    stamp="$dest/.apollo-source"
+    if [[ -f "$stamp" && "$(<"$stamp")" == "$tag" ]] && has_font_file "$dest" ttf; then
+      info "Noroshi Code already present ($tag)"
+      exit 0
+    fi
+    info "installing Noroshi Code hinted TTF from GitHub ($tag)..."
+    GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --depth 1 --filter=blob:none --sparse --branch "$tag" \
+      https://github.com/Honoka55/noroshi.git "$tmp/noroshi"
+    git -C "$tmp/noroshi" sparse-checkout set --cone fonts/NoroshiCode/ttf/hinted
+    rm -rf "$dest"
+    mkdir -p "$dest"
+    copy_desktop_fonts "$tmp/noroshi/fonts/NoroshiCode/ttf/hinted" "$dest" ttf
+    reject_web_fonts "$dest"
+    printf '%s\n' "$tag" >"$stamp"
+    info "Noroshi Code installed → $dest ($tag)"
+  )
+}
+
+set_ini_key() {
+  local file="$1" section="$2" key="$3" value="$4"
+  mkdir -p "$(dirname "$file")"
+  if [[ ! -f "$file" ]]; then
+    printf '[%s]\n%s=%s\n' "$section" "$key" "$value" >"$file"
+    return 0
+  fi
+  if grep -q "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    return 0
+  fi
+  if grep -q "^\\[${section}\\]" "$file"; then
+    sed -i "/^\\[${section}\\]/a ${key}=${value}" "$file"
+  else
+    printf '\n[%s]\n%s=%s\n' "$section" "$key" "$value" >>"$file"
+  fi
+}
+
+set_kitty_key() {
+  local file="$1" key="$2" value="$3"
+  if grep -qE "^[[:space:]]*${key}([[:space:]]|$)" "$file"; then
+    sed -i -E "s|^[[:space:]]*${key}[[:space:]].*|${key} ${value}|" "$file"
+  else
+    printf '%s %s\n' "$key" "$value" >>"$file"
+  fi
+}
+
+apply_font_configs() {
+  local cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
+  local fc_dst="$cfg/fontconfig/conf.d/60-apollo-fonts.conf"
+  local gtk_src gtk_dst kde_dst kitty_dst
+
+  mkdir -p "$(dirname "$fc_dst")"
+  install -m 0644 "$ROOT/config/fontconfig/conf.d/60-apollo-fonts.conf" "$fc_dst"
+  info "wrote $fc_dst"
+
+  for gtk_src in gtk-3.0 gtk-4.0; do
+    gtk_dst="$cfg/$gtk_src/settings.ini"
+    mkdir -p "$(dirname "$gtk_dst")"
+    if [[ ! -f "$gtk_dst" ]]; then
+      install -m 0644 "$ROOT/config/$gtk_src/settings.ini" "$gtk_dst"
+      info "wrote $gtk_dst"
+    else
+      set_ini_key "$gtk_dst" Settings gtk-font-name "IBM Plex Sans 11"
+      info "updated gtk-font-name in $gtk_dst"
+    fi
+  done
+
+  kde_dst="$cfg/kdeglobals"
+  if [[ ! -f "$kde_dst" ]]; then
+    install -m 0644 "$ROOT/config/kdeglobals" "$kde_dst"
+    info "wrote $kde_dst"
+  else
+    set_ini_key "$kde_dst" General font "IBM Plex Sans,11,-1,5,50,0,0,0,0,0"
+    set_ini_key "$kde_dst" General fixed "Noroshi Code,11,-1,5,50,0,0,0,0,0"
+    set_ini_key "$kde_dst" General menuFont "IBM Plex Sans,11,-1,5,50,0,0,0,0,0"
+    set_ini_key "$kde_dst" General smallestReadableFont "IBM Plex Sans,8,-1,5,50,0,0,0,0,0"
+    set_ini_key "$kde_dst" General toolBarFont "IBM Plex Sans,11,-1,5,50,0,0,0,0,0"
+    info "updated font keys in $kde_dst"
+  fi
+
+  kitty_dst="$cfg/kitty/kitty.conf"
+  mkdir -p "$(dirname "$kitty_dst")"
+  if [[ ! -f "$kitty_dst" ]]; then
+    install -m 0644 "$ROOT/config/kitty/kitty.conf" "$kitty_dst"
+    info "wrote $kitty_dst"
+  else
+    set_kitty_key "$kitty_dst" font_family "Noroshi Code"
+    set_kitty_key "$kitty_dst" bold_font auto
+    set_kitty_key "$kitty_dst" italic_font auto
+    set_kitty_key "$kitty_dst" bold_italic_font auto
+    info "updated font_family in $kitty_dst"
+  fi
+}
+
+apply_gsettings_fonts() {
+  local failed=0
+  local -a runner=()
+  if ! command -v gsettings >/dev/null 2>&1; then
+    warn "gsettings not found; skipped GSettings font keys"
+    return 0
+  fi
+  if ! gsettings list-schemas 2>/dev/null | grep -qx 'org.gnome.desktop.interface'; then
+    warn "org.gnome.desktop.interface schema missing; skipped GSettings font keys"
+    return 0
+  fi
+  if command -v dbus-run-session >/dev/null 2>&1; then
+    runner=(dbus-run-session --)
+  fi
+  "${runner[@]}" gsettings set org.gnome.desktop.interface font-name 'IBM Plex Sans 11' || failed=1
+  "${runner[@]}" gsettings set org.gnome.desktop.interface document-font-name 'IBM Plex Sans 11' || failed=1
+  "${runner[@]}" gsettings set org.gnome.desktop.interface monospace-font-name 'Noroshi Code 11' || failed=1
+  if [[ "$failed" -ne 0 ]]; then
+    warn "one or more GSettings font keys were not applied"
+  else
+    info "set GSettings interface fonts (IBM Plex Sans 11, Noroshi Code 11)"
+  fi
+}
+
+info "installing fontconfig, Nerd Font symbols, and gsettings schemas..."
+sudo pacman -S --needed --noconfirm \
+  fontconfig \
+  ttf-nerd-fonts-symbols \
+  ttf-nerd-fonts-symbols-mono \
+  gsettings-desktop-schemas
+
+info "installing ttf-apple-emoji from AUR..."
+yay -S --needed --noconfirm ttf-apple-emoji
+
+install_ibm_plex
+install_noroshi
+
+if command -v fc-cache >/dev/null 2>&1; then
+  info "refreshing font cache..."
+  fc-cache -f
+else
+  warn "fc-cache not found; font cache not refreshed"
+fi
+
+apply_font_configs
+apply_gsettings_fonts
+
 # --- install session files (Apollo brand) ---
 SHARE_DIR=/usr/local/share/apollo
 BIN_WRAPPER=/usr/local/bin/apollo-session
@@ -264,6 +497,7 @@ Installed / configured:
   - greetd autologin as ${INSTALL_USER} (NO greeter / NO tuigreet / NO SDDM)
   - fish as login shell for ${INSTALL_USER}
   - kitty, yazi, neovim + LazyVim starter
+  - fonts: IBM Plex OTF, Noroshi Code, Apple Color Emoji, Symbols Nerd Font
   - NetworkManager + BlueZ
 
 Next:

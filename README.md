@@ -8,6 +8,7 @@ Minimal **Arch Linux** desktop environment:
 - **fish** as the account login shell
 - **kitty**, **yazi**, **Neovim + LazyVim**
 - **Brave** (official, AUR `brave-origin-bin`)
+- **Fonts:** IBM Plex (GitHub desktop OTF, including CJK), Noroshi Code, Apple Color Emoji, Symbols Nerd Font
 - **NVIDIA** `nvidia-open` + `nvidia-utils` + `libva-nvidia-driver`
 - hooks for a future Go **`apollod`** settings daemon (unified settings center)
 
@@ -38,6 +39,8 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 | `~/.config/quickshell/apollo/shell.qml` | stub bar |
 | `~/Pictures/wallpapers/` | default wallpapers (exact copy from repo) |
 | `~/.config/kwinrc` | created only if missing |
+| `~/.local/share/fonts/ibm-plex/` | IBM Plex desktop OTF |
+| `~/.local/share/fonts/noroshi/` | Noroshi Code hinted TTF |
 
 ## Re-run
 
@@ -65,3 +68,24 @@ Conflict check: Plasma/KWin default **Meta+T = Edit Tiles** — we move that to 
 | Session env / autostart only | `scripts/start-apollo.sh` — **not** for keybinds |
 
 Later, **apollod** can centralize DE/shell binds; app tools still use their own configs.
+
+## Fonts
+
+`install.sh` installs desktop faces only (no web woff/woff2):
+
+| Family | Source | Role |
+|---|---|---|
+| IBM Plex Sans, Serif, Mono, Condensed, Math, and Sans TC / SC / JP / KR / Arabic / Hebrew / Devanagari / Thai / Thai Looped | GitHub [IBM/plex](https://github.com/IBM/plex) `fonts/complete/otf` (hinted CJK) | UI sans is **IBM Plex Sans**. CJK falls back to **IBM Plex Sans TC**, then SC, JP, KR, and the other Plex script families |
+| Noroshi Code | GitHub [Honoka55/noroshi](https://github.com/Honoka55/noroshi) hinted TTF | Terminal / monospace. **IBM Plex Mono** is the Latin fallback. Bold and italic stay in Noroshi Code |
+| Apple Color Emoji | AUR `ttf-apple-emoji` | Emoji fallback. The package's optional `75-apple-color-emoji.conf` is not enabled |
+| Symbols Nerd Font / Symbols Nerd Font Mono | extra `ttf-nerd-fonts-symbols` and `ttf-nerd-fonts-symbols-mono` (`ttf-nerd-fonts-symbols-common` is a dependency) | Icon fallback, appended after text faces |
+
+Defaults are written to:
+
+- fontconfig `~/.config/fontconfig/conf.d/60-apollo-fonts.conf`
+- GTK `~/.config/gtk-3.0/settings.ini` and `~/.config/gtk-4.0/settings.ini` (`IBM Plex Sans 11`)
+- GSettings `org.gnome.desktop.interface` `font-name`, `document-font-name`, and `monospace-font-name` (`Noroshi Code 11`) when `gsettings` and `gsettings-desktop-schemas` work
+- Qt / KDE `~/.config/kdeglobals`
+- kitty `font_family Noroshi Code`
+
+Re-run updates those font keys and leaves other kitty, GTK, and `kdeglobals` settings in place. `shell.qml` and `kwinrc` are still left untouched when they already exist.
