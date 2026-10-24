@@ -6,6 +6,7 @@ Minimal **Arch Linux** desktop environment:
 - **Quickshell** (bar / shell UI — no `plasmashell`)
 - **greetd** autologin (no greeter UI — not tuigreet / SDDM)
 - **fish** as the account login shell
+- **kitty**, **yazi**, **Neovim + LazyVim**
 - **NVIDIA** `nvidia-open` + `nvidia-utils` + `libva-nvidia-driver`
 - hooks for a future Go **`apollod`** settings daemon (unified settings center)
 
@@ -40,3 +41,15 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 ## Re-run
 
 `./install.sh` is idempotent for user configs: existing `shell.qml` / `kwinrc` are kept.
+
+## Where to put keybinds
+
+| Layer | Config |
+|---|---|
+| KWin (WM / window / global hotkeys) | `~/.config/kwinrc` |
+| Quickshell (bar / shell UI) | `~/.config/quickshell/apollo/` |
+| kitty | `~/.config/kitty/kitty.conf` |
+| Neovim (LazyVim) | `~/.config/nvim/` (LazyVim `keymaps.lua` etc.) |
+| Session env / autostart only | `scripts/start-apollo.sh` — **not** for keybinds |
+
+Later, **apollod** can centralize DE/shell binds; app tools still use their own configs.

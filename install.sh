@@ -58,6 +58,14 @@ PACMAN_PKGS=(
   nvidia-utils
   libva-nvidia-driver
   fish
+  kitty
+  yazi
+  neovim
+  # LazyVim / editor helpers
+  ripgrep
+  fd
+  fzf
+  unzip
   wl-clipboard
   libnotify
   networkmanager
@@ -155,6 +163,17 @@ user = "${INSTALL_USER}"
 GREETD
 
 
+
+# --- LazyVim (Neovim distro) ---
+NVIM_CFG="${XDG_CONFIG_HOME:-$HOME/.config}/nvim"
+if [[ ! -e "$NVIM_CFG" ]]; then
+  info "installing LazyVim starter → $NVIM_CFG"
+  git clone --depth=1 https://github.com/LazyVim/starter "$NVIM_CFG"
+  rm -rf "$NVIM_CFG/.git"
+else
+  info "keep existing $NVIM_CFG (not overwriting LazyVim/neovim config)"
+fi
+
 # --- wallpapers (pixel-perfect copy, no recompress) ---
 WP_SRC="$ROOT/wallpapers"
 WP_DST="${XDG_PICTURES_DIR:-$HOME/Pictures}/wallpapers"
@@ -211,6 +230,7 @@ Installed / configured:
   - NVIDIA: nvidia-open + nvidia-utils + libva-nvidia-driver
   - greetd autologin as ${INSTALL_USER} (NO greeter / NO tuigreet / NO SDDM)
   - fish as login shell for ${INSTALL_USER}
+  - kitty, yazi, neovim + LazyVim starter
   - NetworkManager + BlueZ
 
 Next:
