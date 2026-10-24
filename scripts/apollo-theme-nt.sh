@@ -120,7 +120,11 @@ set_ini() {
 
 assets_ready() {
   [[ -f "$data/aurorae/themes/$DAY_DIR/metadata.desktop" ]] \
+    && [[ -f "$data/aurorae/themes/$DAY_DIR/decoration.svg" ]] \
+    && [[ -f "$data/aurorae/themes/$DAY_DIR/${DAY_DIR}rc" ]] \
     && [[ -f "$data/aurorae/themes/$NIGHT_DIR/metadata.desktop" ]] \
+    && [[ -f "$data/aurorae/themes/$NIGHT_DIR/decoration.svg" ]] \
+    && [[ -f "$data/aurorae/themes/$NIGHT_DIR/${NIGHT_DIR}rc" ]] \
     && [[ -f "$data/color-schemes/$DAY_COLOR.colors" ]] \
     && [[ -f "$data/color-schemes/$NIGHT_COLOR.colors" ]] \
     && [[ -f "$data/icons/$DAY_ICONS/index.theme" ]] \
@@ -225,9 +229,13 @@ cmd_fetch() {
     [[ -f "$src/color-schemes/$NIGHT_COLOR.colors" ]] || die "sparse checkout missed $NIGHT_COLOR.colors"
     [[ -f "$src/icons-nt/$DAY_ICONS/index.theme" ]] || die "sparse checkout missed $DAY_ICONS"
     grep -qx "X-KDE-PluginInfo-Name=$DAY_DECO" "$src/aurorae/$DAY_DIR/metadata.desktop" \
-      || die "unexpected Aurorae id in $DAY_DIR"
+      || die "unexpected Aurorae id in $DAY_DIR (expected X-KDE-PluginInfo-Name=$DAY_DECO)"
     grep -qx "X-KDE-PluginInfo-Name=$NIGHT_DECO" "$src/aurorae/$NIGHT_DIR/metadata.desktop" \
-      || die "unexpected Aurorae id in $NIGHT_DIR"
+      || die "unexpected Aurorae id in $NIGHT_DIR (expected X-KDE-PluginInfo-Name=$NIGHT_DECO)"
+    [[ -f "$src/aurorae/$DAY_DIR/decoration.svg" && -f "$src/aurorae/$DAY_DIR/${DAY_DIR}rc" ]] \
+      || die "$DAY_DIR is missing decoration.svg or ${DAY_DIR}rc"
+    [[ -f "$src/aurorae/$NIGHT_DIR/decoration.svg" && -f "$src/aurorae/$NIGHT_DIR/${NIGHT_DIR}rc" ]] \
+      || die "$NIGHT_DIR is missing decoration.svg or ${NIGHT_DIR}rc"
 
     mkdir -p "$data/aurorae/themes" "$data/color-schemes" "$data/icons" "$data/apollo/nt-legacy"
     rm -rf "$data/aurorae/themes/$DAY_DIR" "$data/aurorae/themes/$NIGHT_DIR"
@@ -286,6 +294,191 @@ notify_session() {
         >/dev/null 2>&1 || true
     done
   fi
+
+  # Official writer when KWin is already up. Headless install has no session
+  # bus; a failure leaves the kwinrc keys written above.
+  local apply_deco="${1:-}"
+  local tool=""
+  if [[ -n "$apply_deco" ]]; then
+    if command -v kwin-applywindowdecoration >/dev/null 2>&1; then
+      tool="kwin-applywindowdecoration"
+    elif [[ -x /usr/lib/kwin-applywindowdecoration ]]; then
+      tool="/usr/lib/kwin-applywindowdecoration"
+    elif [[ -x /usr/lib/plasma-apply-aurorae ]]; then
+      tool="/usr/lib/plasma-apply-aurorae"
+    fi
+    if [[ -n "$tool" ]]; then
+      "$tool" "$apply_deco" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+require_windows_style() {
+  # Tests set this. A real apply must see Qt's built-in Windows style.
+  if [[ "${APOLLO_NT_ASSUME_WINDOWS_STYLE:-}" == 1 ]]; then
+    return 0
+  fi
+
+  local cache lib stamp diag src bin log
+  cache="${XDG_CACHE_HOME:-$HOME/.cache}/apollo"
+  mkdir -p "$cache"
+  stamp="$cache/windows-style.ok"
+  lib=""
+  if command -v ldconfig >/dev/null 2>&1; then
+    lib="$(ldconfig -p 2>/dev/null | awk '/libQt6Widgets\.so/{ print $NF; exit }')"
+  fi
+  if [[ -z "$lib" ]]; then
+    for lib in /usr/lib/libQt6Widgets.so.6 /usr/lib/libQt6Widgets.so; do
+      if [[ -e "$lib" ]]; then
+        break
+      fi
+      lib=""
+    done
+  fi
+  if [[ -n "$lib" && -f "$stamp" && "$stamp" -nt "$lib" ]]; then
+    return 0
+  fi
+
+  diag=""
+  if command -v qtdiag6 >/dev/null 2>&1; then
+    diag="$(qtdiag6 2>/dev/null || true)"
+  elif command -v qtdiag >/dev/null 2>&1; then
+    diag="$(qtdiag 2>/dev/null || true)"
+  elif [[ -x /usr/lib/qt6/bin/qtdiag ]]; then
+    diag="$(/usr/lib/qt6/bin/qtdiag 2>/dev/null || true)"
+  fi
+  if printf '%s\n' "$diag" | grep -Ei '^Styles:' | grep -qi 'windows'; then
+    : >"$stamp"
+    return 0
+  fi
+
+  command -v g++ >/dev/null 2>&1 || die "Qt Windows widget style is required and could not be checked (g++ is missing)"
+  command -v pkg-config >/dev/null 2>&1 || die "Qt Windows widget style is required and could not be checked (pkg-config is missing)"
+  pkg-config --exists Qt6Widgets || die "Qt6Widgets is missing, so widgetStyle=Windows cannot be applied"
+
+  src="$(mktemp --suffix=.cpp)"
+  bin="$(mktemp)"
+  log="$(mktemp)"
+  cat >"$src" <<'EOF'
+#include <QApplication>
+#include <QStyleFactory>
+int main(int argc, char **argv) {
+    QApplication app(argc, argv);
+    const auto keys = QStyleFactory::keys();
+    for (const auto &key : keys) {
+        if (key.compare(QLatin1String("Windows"), Qt::CaseInsensitive) == 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+EOF
+  # shellcheck disable=SC2046
+  if ! g++ -o "$bin" "$src" $(pkg-config --cflags --libs Qt6Widgets) >"$log" 2>&1; then
+    cat "$log" >&2
+    rm -f "$src" "$bin" "$log"
+    die "could not compile the Qt Windows style check"
+  fi
+  rm -f "$src" "$log"
+  if ! QT_QPA_PLATFORM=offscreen "$bin"; then
+    rm -f "$bin"
+    die "Qt has no Windows widget style. Apollo will not apply NT Legacy without it."
+  fi
+  rm -f "$bin"
+  : >"$stamp"
+}
+
+# plasma-integration uses the Colors:* groups already in kdeglobals when they
+# exist, and ignores General ColorScheme. Copy the scheme the way
+# plasma-apply-colorscheme does, without pulling in plasmashell.
+apply_color_scheme() {
+  local src="$1" scheme_id="$2"
+  local hash tmp key val
+  [[ -f "$src" ]] || die "missing colour scheme $src"
+  hash="$(sha1sum "$src" | awk 'NR==1 { print $1 }')"
+  [[ -n "$hash" ]] || die "could not hash $src"
+  [[ -n "$(read_ini "$src" "Colors:Window" BackgroundNormal)" ]] \
+    || die "$scheme_id has no Colors:Window BackgroundNormal"
+
+  mkdir -p "$(dirname "$kdeglobals")"
+  [[ -f "$kdeglobals" ]] || : >"$kdeglobals"
+  tmp="$(mktemp "$(dirname "$kdeglobals")/.apollo-colors.XXXXXX")"
+  awk '
+    FNR == NR {
+      if ($0 ~ /^\[/) {
+        sec = $0
+        if (sec ~ /^\[Colors:/ || sec ~ /^\[ColorEffects:/) {
+          if (!(sec in seen)) {
+            seen[sec] = 1
+            order[++n] = sec
+          }
+          body[sec] = ""
+          copying = 1
+        } else {
+          copying = 0
+        }
+        next
+      }
+      if (copying) {
+        body[sec] = body[sec] $0 ORS
+      }
+      next
+    }
+    {
+      if ($0 ~ /^\[/) {
+        dropping = ($0 ~ /^\[Colors:/ || $0 ~ /^\[ColorEffects:/)
+        if (dropping) next
+      }
+      if (dropping) next
+      print
+    }
+    END {
+      for (i = 1; i <= n; i++) {
+        print ""
+        print order[i]
+        printf "%s", body[order[i]]
+      }
+    }
+  ' "$src" "$kdeglobals" >"$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$kdeglobals"
+
+  set_ini "$kdeglobals" General ColorScheme "$scheme_id"
+  set_ini "$kdeglobals" General ColorSchemeHash "$hash"
+  # KColorSchemeManager (Frameworks 6.16+) reads the id from here.
+  set_ini "$kdeglobals" UiSettings ColorScheme "$scheme_id"
+
+  for key in contrast frameContrast; do
+    val="$(read_ini "$src" KDE "$key")"
+    if [[ -n "$val" ]]; then
+      set_ini "$kdeglobals" KDE "$key" "$val"
+    fi
+  done
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    val="$(read_ini "$src" WM "$key")"
+    if [[ -n "$val" ]]; then
+      set_ini "$kdeglobals" WM "$key" "$val"
+    fi
+  done <<'EOF'
+activeBackground
+activeForeground
+inactiveBackground
+inactiveForeground
+activeBlend
+inactiveBlend
+EOF
+}
+
+palette_matches() {
+  local scheme="$1" src expected actual
+  src="$data/color-schemes/${scheme}.colors"
+  [[ -f "$src" ]] || return 1
+  expected="$(read_ini "$src" "Colors:Window" BackgroundNormal)"
+  actual="$(read_ini "$kdeglobals" "Colors:Window" BackgroundNormal)"
+  [[ -n "$expected" && "$actual" == "$expected" ]] \
+    && [[ "$(read_ini "$kdeglobals" UiSettings ColorScheme)" == "$scheme" ]] \
+    && [[ "$(read_ini "$kdeglobals" General ColorSchemeHash)" == "$(sha1sum "$src" | awk 'NR==1 { print $1 }')" ]]
 }
 
 cmd_apply() {
@@ -317,12 +510,16 @@ cmd_apply() {
     grep -qx 'Inherits=breeze,hicolor' "$data/icons/$DAY_ICONS/index.theme" \
       || die "$DAY_ICONS is missing the breeze fallback; run fetch again"
   fi
+  [[ -f "$data/aurorae/themes/$dir/decoration.svg" && -f "$data/aurorae/themes/$dir/${dir}rc" ]] \
+    || die "Aurorae theme $dir is missing decoration.svg or ${dir}rc"
+  require_windows_style
 
   # Write every layer before notifying, so a running session never sees a
-  # day frame with a night palette.
+  # day frame with a night palette. library stays the v1 id; KWin 6.6+
+  # rewrites it to org.kde.kwin.aurorae.v2 at session start.
   set_ini "$kwinrc" org.kde.kdecoration2 library "$AURORAE_LIBRARY"
   set_ini "$kwinrc" org.kde.kdecoration2 theme "$deco"
-  set_ini "$kdeglobals" General ColorScheme "$color"
+  apply_color_scheme "$data/color-schemes/${color}.colors" "$color"
   set_ini "$kdeglobals" KDE widgetStyle "$WIDGET_STYLE"
   set_ini "$kdeglobals" Icons Theme "$icons"
   set_ini "$pcmanfm_conf" System IconThemeName "$icons"
@@ -330,9 +527,10 @@ cmd_apply() {
   mkdir -p "$(dirname "$marker")"
   printf '%s\n' "$which" >"$marker"
 
-  notify_session
+  notify_session "$deco"
   info "applied $which ($color)"
-  info "Aurorae title bars load when KWin starts. If the frame did not change, log out and back in once."
+  info "Colour values were copied into $kdeglobals."
+  info "Aurorae title bars load when KWin starts. If the frame or colours did not change, log out and back in once."
   info "Qt apps that are already open may need a restart for colours, icons, and the Windows widget style."
   cmd_status
 }
@@ -343,7 +541,8 @@ layers_match() {
     && [[ "$(read_ini "$kwinrc" org.kde.kdecoration2 theme)" == "$deco" ]] \
     && [[ "$(read_ini "$kdeglobals" General ColorScheme)" == "$color" ]] \
     && [[ "$(read_ini "$kdeglobals" Icons Theme)" == "$icons" ]] \
-    && [[ "$(read_ini "$kdeglobals" KDE widgetStyle)" == "$WIDGET_STYLE" ]]
+    && [[ "$(read_ini "$kdeglobals" KDE widgetStyle)" == "$WIDGET_STYLE" ]] \
+    && palette_matches "$color"
 }
 
 pcmanfm_matches() {
@@ -381,6 +580,7 @@ cmd_status() {
   printf 'color_scheme=%s\n' "$col"
   printf 'icons=%s\n' "$ico"
   printf 'widget_style=%s\n' "$sty"
+  printf 'palette_window=%s\n' "$(read_ini "$kdeglobals" "Colors:Window" BackgroundNormal)"
   printf 'pcmanfm_icons=%s\n' "$pcm"
   printf 'pcmanfm_fallback_icons=%s\n' "$pcm_fb"
 }

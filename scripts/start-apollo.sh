@@ -29,6 +29,32 @@ elif [[ -x /usr/lib/polkit-kde-agent-1 ]]; then
   /usr/lib/polkit-kde-agent-1 &
 fi
 
+# Plasma 6.8 links KGlobalAccelD into KWin, so Meta+T is handled inside
+# kwin_wayland and there is no /usr/lib/kglobalacceld. Older Plasma still
+# ships that daemon; start it when the binary exists. Failure must not
+# abort the session.
+start_legacy_global_shortcuts() {
+  local bin="" candidate
+  for candidate in /usr/lib/kglobalacceld /usr/libexec/kglobalacceld; do
+    if [[ -x "$candidate" ]]; then
+      bin="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$bin" ]]; then
+    bin="$(command -v kglobalacceld 2>/dev/null || true)"
+  fi
+  if [[ -z "$bin" ]]; then
+    return 0
+  fi
+  if command -v pgrep >/dev/null 2>&1 && pgrep -x "$(basename "$bin")" >/dev/null 2>&1; then
+    return 0
+  fi
+  "$bin" >/dev/null 2>&1 &
+  echo "started $(basename "$bin") for global shortcuts" >&2
+}
+start_legacy_global_shortcuts || echo "warning: global shortcuts daemon failed to start" >&2
+
 # apollod = unified settings center daemon (Wi-Fi/BT/monitors/look/keybinds/exec)
 if command -v apollod >/dev/null 2>&1; then
   apollod &

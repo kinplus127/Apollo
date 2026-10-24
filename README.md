@@ -58,7 +58,7 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 
 ## Re-run
 
-`./install.sh` does not replace an existing `shell.qml` or `kwinrc`. The first NT Legacy install applies the **day** theme once (decoration, colours, icons, and the Windows widget style together). Later runs refresh upstream assets when that git revision moves, and leave the chosen day or night variant in place.
+`./install.sh` does not replace an existing `shell.qml` or `kwinrc`. Each run applies the NT Legacy variant already chosen (day the first time). That refreshes the Aurorae keys and copies the colour scheme into `kdeglobals`. It does not switch a chosen night variant back to day.
 
 ## Default keybinds (installed)
 
@@ -72,7 +72,7 @@ After reboot, greetd starts **Apollo** as the installing user with no login scre
 | Super+C | Capture a rectangular region | `spectacle --background --region` (selector, then save; no viewer) |
 | Super+Shift+C | Capture the full desktop | `spectacle --background --fullscreen` |
 
-Conflict check: Plasma/KWin default **Meta+T = Edit Tiles** — we move that to **Meta+Shift+T** so Super+T can open kitty. **Meta+Q** is Activities in full Plasma; Apollo does not ship plasmashell, so it is free for close. **Meta+L** is Plasma's lock shortcut; here it runs Apollo's locker script instead of plasmashell. **Meta+C** and **Meta+Shift+C** were unused. **Ctrl+C** is left as copy / interrupt.
+Conflict check: Plasma/KWin default **Meta+T = Edit Tiles** — we move that to **Meta+Shift+T** so Super+T can open kitty. The binding is `[services][kitty.desktop]` in `kglobalshortcutsrc`. Plasma 6.8 runs that shortcut service inside KWin, so the session does not start a separate daemon. If `/usr/lib/kglobalacceld` exists (older Plasma), `start-apollo.sh` starts it. A copy of `kitty.desktop` is also placed in `~/.local/share/kglobalaccel/` so the shortcut still resolves when the KService cache does not list kitty yet. **Meta+Q** is Activities in full Plasma; Apollo does not ship plasmashell, so it is free for close. **Meta+L** is Plasma's lock shortcut; here it runs Apollo's locker script instead of plasmashell. **Meta+C** and **Meta+Shift+C** were unused. **Ctrl+C** is left as copy / interrupt.
 
 ## Input method
 
@@ -133,7 +133,7 @@ Apollo 只安裝標題列與 Qt 程式需要的層次，並以日間 **win98**�
 | 圖示 | `NTLegacyIcons`（繼承 Breeze） | `NTLegacyIconsNacht`（繼承 Breeze Dark） |
 | Qt 控制項 | `widgetStyle=Windows`（Qt 內建 Windows 9x 樣式，不用 Kvantum） | 同左 |
 
-`start-apollo.sh` 設定 `QT_QPA_PLATFORMTHEME=kde`，由 `plasma-integration` 讀取 `kdeglobals`。此套件不是 `plasmashell`。
+`start-apollo.sh` 設定 `QT_QPA_PLATFORMTHEME=kde`，由 `plasma-integration` 讀取 `kdeglobals`。此套件不是 `plasmashell`。色彩不是只寫 `ColorScheme` 名稱：`plasma-integration` 在 `kdeglobals` 已有 `Colors:*` 時會忽略該名稱，所以腳本會把方案內容抄進 `kdeglobals`（與 `plasma-apply-colorscheme` 相同，但不安裝 `plasmashell`）。Qt 沒有內建 `Windows` widget style 時，套用會直接失敗。
 
 切換（四層同時寫入；Quickshell 日後可呼叫 `toggle`，目前沒有按鈕）：
 
@@ -146,7 +146,15 @@ apollo-theme-nt status
 
 `status` 印出 `variant=`、`coherent=` 及各層名稱。`toggle` 在日間與夜間之間對調；若設定混雜或尚未套用，則改為日間。
 
-Aurorae 標題列在 KWin 啟動時載入。腳本會通知 KWin 重新讀取設定；若標題列未變，請登出再登入一次。已開啟的 Qt 程式可能要重新開啟，才會使用新的色彩、圖示與 Windows 控制項樣式。
+Aurorae 標題列在 KWin 啟動時載入。KWin 6.6 及之後會在登入時把 decoration library 從 `org.kde.kwin.aurorae` 改寫成 `org.kde.kwin.aurorae.v2`；主題名稱維持 `__aurorae__svg__NTLegacyWin98`（或夜間的 `NTLegacyWin98Nacht`）。腳本會通知 KWin 重新讀取設定。若標題列或色彩仍是舊的，請再執行一次後登出再登入：
+
+```bash
+apollo-theme-nt day
+```
+
+已選夜間時用 `apollo-theme-nt night`。已開啟的 Qt 程式可能要重新開啟，才會使用新的色彩、圖示與 Windows 控制項樣式。
+
+Meta+T 由 KWin 內建的全域快捷鍵服務啟動 kitty（Plasma 6.8 不再另外執行 `kglobalacceld`）。改完設定後同樣需要登出一次，工作階段才會讀到新的 `kglobalshortcutsrc`。
 
 ### 檔案總管與音量
 
@@ -156,7 +164,7 @@ Aurorae 標題列在 KWin 啟動時載入。腳本會通知 KWin 重新讀取設
 
 **pavucontrol-qt** 是 Qt 版 PulseAudio 音量控制，只加入安裝清單，沒有 Quickshell 按鈕。它需要 Pulse 插座；Apollo 安裝 `pipewire-pulse`（不要另外安裝 `pulseaudio`）。啟動指令是 `pavucontrol-qt`。
 
-English: the same pair is what `apollo-theme-nt` writes. Panels, Global Theme, GRUB, and Plymouth from upstream are omitted on purpose. Log out once if the title bar does not follow a switch. A future Quickshell button should call `apollo-theme-nt toggle` and does not exist yet.
+English: the same pair is what `apollo-theme-nt` writes. Panels, Global Theme, GRUB, and Plymouth from upstream are omitted on purpose. If the frame or colours stay on the previous look, run `apollo-theme-nt day` (or `night` if that is the variant you kept) and log out once. Meta+T launches kitty after that login. A future Quickshell button should call `apollo-theme-nt toggle` and does not exist yet.
 
 ## Wallpaper
 

@@ -31,28 +31,6 @@ cleanup_sudo_keepalive() {
   fi
 }
 
-# One pacman transaction for every official package, including awww when the
-# mirror has it. Home-directory theme and font copies stay outside and do not
-# use sudo.
-install_official_packages() {
-  local flag="$1"
-  shift
-  sudo bash -s -- "$flag" "$@" <<'EOS'
-set -euo pipefail
-flag="$1"
-shift
-pkgs=("$@")
-pacman -Sy --noconfirm
-# awww replaced swww. If the mirror does not have it yet, the AUR fallback
-# runs later as the installing user.
-if pacman -Si awww >/dev/null 2>&1; then
-  pkgs+=(awww)
-  printf 'official\n' >"$flag"
-fi
-pacman -Su --needed --noconfirm "${pkgs[@]}"
-EOS
-}
-
 apply_root_setup() {
   local fish_bin="$1"
   info "applying root setup once (login shell, session files, greetd, services)..."
@@ -227,16 +205,19 @@ PACMAN_PKGS=(
 
 # NVIDIA modeset: shipped by Arch nvidia-utils (no extra modprobe/mkinitcpio here).
 
+# awww replaced swww. pacman -Si does not need root. Do not ask the root
+# shell to write a user-owned temp file: a private /tmp rejects that, and
+# the whole install then stops before apollo-theme-nt is copied.
 info "installing official packages..."
-AWWW_FLAG="$(mktemp)"
-install_official_packages "$AWWW_FLAG" "${PACMAN_PKGS[@]}"
-if [[ "$(<"$AWWW_FLAG")" == "official" ]]; then
+AWWW_FROM_OFFICIAL=0
+if pacman -Si awww >/dev/null 2>&1; then
+  PACMAN_PKGS+=(awww)
   AWWW_FROM_OFFICIAL=1
-  info "awww included from the official repositories"
+  info "awww is in the official repositories; including it in this pacman transaction"
 else
-  AWWW_FROM_OFFICIAL=0
+  info "awww is not in the official repositories; will use AUR awww-git"
 fi
-rm -f "$AWWW_FLAG"
+sudo pacman -Syu --needed --noconfirm "${PACMAN_PKGS[@]}"
 
 # --- fish, session files, greetd, services: one root shell ---
 FISH_BIN="$(command -v fish || true)"
@@ -244,6 +225,9 @@ if [[ -z "$FISH_BIN" ]]; then
   warn "fish binary not found after install"
 fi
 apply_root_setup "$FISH_BIN"
+if [[ ! -x /usr/local/bin/apollo-theme-nt ]]; then
+  die "apollo-theme-nt is not executable at /usr/local/bin/apollo-theme-nt (session files were not installed)"
+fi
 
 # --- AUR helper (yay) ---
 install_yay() {
@@ -272,6 +256,13 @@ if [[ "$AWWW_FROM_OFFICIAL" -ne 1 ]]; then
 fi
 info "installing AUR packages: ${AUR_PKGS[*]}"
 yay -S --needed --noconfirm "${AUR_PKGS[@]}"
+
+# KWin's shortcut service resolves kitty.desktop through the KService cache.
+# A missing cache is not fatal: ~/.local/share/kglobalaccel/kitty.desktop is
+# the fallback installed below.
+if command -v kbuildsycoca6 >/dev/null 2>&1; then
+  kbuildsycoca6 --noincremental >/dev/null 2>&1 || warn "kbuildsycoca6 failed; Meta+T still has the kglobalaccel kitty.desktop fallback"
+fi
 
 # --- fonts ---
 # IBM Plex release zips mix in woff/woff2, so copy desktop OTF only
@@ -504,6 +495,11 @@ install -m 0644 "$ROOT/session/apollo-lock.desktop" "$USER_APP_DIR/apollo-lock.d
 install -m 0644 "$ROOT/session/apollo-logout.desktop" "$USER_APP_DIR/apollo-logout.desktop"
 install -m 0644 "$ROOT/session/apollo-screenshot-region.desktop" "$USER_APP_DIR/apollo-screenshot-region.desktop"
 install -m 0644 "$ROOT/session/apollo-screenshot-full.desktop" "$USER_APP_DIR/apollo-screenshot-full.desktop"
+# Resolved when KService does not know kitty.desktop yet. The component name
+# stays kitty.desktop, matching kglobalshortcutsrc.
+mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/kglobalaccel"
+install -m 0644 "$ROOT/session/kitty.desktop" \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/kglobalaccel/kitty.desktop"
 
 
 
@@ -535,8 +531,14 @@ if [[ -f "$KGSNIP" ]]; then
         printf '\n[kwin]\nWindow Close=Meta+Q\\tAlt+F4,Alt+F4,Close Window\n' >> "$KGSRC"
       fi
     fi
+    # KWin's compiled default for Edit Tiles is Meta+T. Write the key even
+    # when the file never had that line, or Meta+T stays on the tile editor.
     if grep -q '^Edit Tiles=' "$KGSRC"; then
       sed -i 's/^Edit Tiles=.*/Edit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling/' "$KGSRC"
+    elif grep -q '^\[kwin\]' "$KGSRC"; then
+      sed -i '/^\[kwin\]/a Edit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling' "$KGSRC"
+    else
+      printf '\n[kwin]\nEdit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling\n' >> "$KGSRC"
     fi
     if ! grep -q '\[services\]\[kitty.desktop\]' "$KGSRC"; then
       printf '\n[services][kitty.desktop]\n_k_friendly_name=kitty\n_launch=Meta+T,none,Launch kitty\n' >> "$KGSRC"
@@ -612,35 +614,31 @@ info "installing NT Legacy 98 (win98 / win98-nacht) assets..."
 "$ROOT/scripts/apollo-theme-nt.sh" fetch
 
 KWINRC="${XDG_CONFIG_HOME:-$HOME/.config}/kwinrc"
-kwin_created=0
 mkdir -p "$(dirname "$KWINRC")"
 if [[ ! -f "$KWINRC" ]]; then
   install -m 0644 "$ROOT/config/kwin/kwinrc.snippet" "$KWINRC"
-  kwin_created=1
   info "wrote $KWINRC"
 else
-  info "keep existing $KWINRC (not overwriting)"
+  info "keep existing $KWINRC (decoration keys are still updated by apollo-theme-nt)"
 fi
 
+# Re-apply the variant already chosen so a newer script can fill in colour
+# groups and the decoration keys. This does not switch night back to day.
 NT_APPLIED="${XDG_DATA_HOME:-$HOME/.local/share}/apollo/nt-legacy/applied"
-if [[ ! -f "$NT_APPLIED" ]]; then
-  info "applying NT Legacy 98 day theme"
-  "$ROOT/scripts/apollo-theme-nt.sh" day
-elif [[ "$kwin_created" -eq 1 ]]; then
+nt_variant="day"
+if [[ -f "$NT_APPLIED" ]]; then
   nt_variant="$(<"$NT_APPLIED")"
-  case "$nt_variant" in
-    day|night)
-      info "restoring NT Legacy variant ($nt_variant) into new kwinrc"
-      "$ROOT/scripts/apollo-theme-nt.sh" "$nt_variant"
-      ;;
-    *)
-      warn "invalid NT Legacy marker ($nt_variant); applying day"
-      "$ROOT/scripts/apollo-theme-nt.sh" day
-      ;;
-  esac
-else
-  info "NT Legacy variant already chosen ($(<"$NT_APPLIED")); not switching"
 fi
+case "$nt_variant" in
+  day|night)
+    info "applying NT Legacy 98 ($nt_variant)"
+    "$ROOT/scripts/apollo-theme-nt.sh" "$nt_variant"
+    ;;
+  *)
+    warn "invalid NT Legacy marker ($nt_variant); applying day"
+    "$ROOT/scripts/apollo-theme-nt.sh" day
+    ;;
+esac
 "$ROOT/scripts/apollo-theme-nt.sh" ensure-file-manager
 
 cat <<DONE
@@ -670,7 +668,8 @@ Next:
   3) edit shell:  ~/.config/quickshell/apollo/shell.qml
   4) edit kwin:   ~/.config/kwinrc
   5) theme:      apollo-theme-nt day | night | toggle
-     Aurorae title bars load when KWin starts. Log out once if the frame stays old.
+     Colours are copied into ~/.config/kdeglobals. Log out once if the
+     title bar or colours stay on the previous look.
      Volume: pavucontrol-qt   Files: pcmanfm-qt
 
 NVIDIA:
