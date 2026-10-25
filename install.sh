@@ -55,9 +55,17 @@ if [[ -n "$fish_bin" && -x "$fish_bin" ]]; then
   fi
 fi
 
-if pacman -Q greetd-tuigreet >/dev/null 2>&1; then
-  log "removing greetd-tuigreet..."
-  pacman -Rns --noconfirm greetd-tuigreet || log "warning: could not remove greetd-tuigreet"
+if [[ ! -x /usr/bin/tuigreet ]]; then
+  echo "[apollo] error: /usr/bin/tuigreet is missing (package greetd-tuigreet)." >&2
+  exit 1
+fi
+if [[ ! -f "$root/config/greetd/config.toml" ]]; then
+  echo "[apollo] error: this checkout has no config/greetd/config.toml." >&2
+  exit 1
+fi
+if grep -q '^\[initial_session\]' "$root/config/greetd/config.toml"; then
+  echo "[apollo] error: config/greetd/config.toml must not contain [initial_session] (autologin)." >&2
+  exit 1
 fi
 if systemctl list-unit-files --no-legend 'sddm.service' 2>/dev/null | grep -q .; then
   systemctl disable sddm.service >/dev/null 2>&1 || true
@@ -72,8 +80,7 @@ install -m 0755 "$root/scripts/start-apollo.sh" "$share/scripts/start-apollo.sh"
 install -m 0755 "$root/scripts/apollo-session" /usr/local/bin/apollo-session
 install -m 0755 "$root/scripts/apollo-lock.sh" "$share/scripts/apollo-lock.sh"
 install -m 0755 "$root/scripts/apollo-logout.sh" "$share/scripts/apollo-logout.sh"
-install -m 0755 "$root/scripts/apollo-theme-nt.sh" "$share/scripts/apollo-theme-nt.sh"
-install -m 0755 "$root/scripts/apollo-theme-nt.sh" /usr/local/bin/apollo-theme-nt
+rm -f /usr/local/bin/apollo-theme-nt "$share/scripts/apollo-theme-nt.sh"
 install -m 0644 "$root/session/apollo.desktop" /usr/local/share/wayland-sessions/apollo.desktop
 install -m 0644 "$root/session/apollo-lock.desktop" /usr/local/share/applications/apollo-lock.desktop
 install -m 0644 "$root/session/apollo-logout.desktop" /usr/local/share/applications/apollo-logout.desktop
@@ -83,20 +90,14 @@ rm -f /usr/local/bin/universe-kwin-session \
   /usr/local/share/wayland-sessions/universe-kwin.desktop
 rm -rf /usr/local/share/universe-kwin
 
-cat >/etc/greetd/config.toml <<EOF
-[terminal]
-vt = 1
-
-# Boot straight into Apollo as ${user} — no greeter.
-[initial_session]
-command = "apollo-session"
-user = "${user}"
-
-# After logout / session exit, start Apollo again (still no greeter).
-[default_session]
-command = "apollo-session"
-user = "${user}"
-EOF
+install -m 0644 "$root/config/greetd/config.toml" /etc/greetd/config.toml
+if ! getent passwd greeter >/dev/null; then
+  log "creating system user greeter"
+  useradd --system --user-group --home-dir /var/lib/greeter --create-home --shell /usr/bin/nologin greeter
+fi
+install -d -m 0755 /var/cache/tuigreet
+chown greeter:greeter /var/cache/tuigreet
+log "greetd asks for a password via tuigreet; autologin is not configured"
 
 log "enabling NetworkManager, bluetooth, greetd..."
 systemctl enable NetworkManager.service || log "warning: could not enable NetworkManager"
@@ -105,7 +106,7 @@ systemctl enable greetd.service
 EOS
 }
 
-# fish in kitty does not always inherit /usr/local/bin from greetd.
+# fish started from the session does not always inherit these directories.
 install_fish_path() {
   local dest="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d"
   mkdir -p "$dest"
@@ -113,62 +114,24 @@ install_fish_path() {
   info "wrote $dest/apollo.fish (PATH includes /usr/local/bin and ~/.local/bin)"
 }
 
-# Session wrappers are root-owned. If that copy did not land, leave a
-# home-directory link so the command still exists, then abort: a missing
-# /usr/local/bin wrapper means the session install did not finish.
-require_theme_command() {
-  local system_bin="/usr/local/bin/apollo-theme-nt"
-  local user_bin="${HOME}/.local/bin"
-  local user_link="${user_bin}/apollo-theme-nt"
-  local src="$ROOT/scripts/apollo-theme-nt.sh"
-  local resolved
+# Session files are root-owned. Abort when the greeter config or entrypoint
+# did not land, and when an old NT theme command is still installed.
+require_session_install() {
+  local bin="/usr/local/bin/apollo-session"
+  local greetd_cfg="/etc/greetd/config.toml"
 
-  # /usr/local/bin first, so a leftover ~/.local/bin link cannot hide it.
-  PATH="/usr/local/bin:${user_bin}:${PATH}"
-  export PATH
-  hash -r || true
-
-  if [[ ! -x "$system_bin" ]]; then
-    if [[ ! -f "$src" ]]; then
-      die "this checkout has no scripts/apollo-theme-nt.sh. Check out the Apollo branch that adds the NT theme (or main after it is merged) and re-run ./install.sh."
-    fi
-    mkdir -p "$user_bin"
-    ln -sfn "$src" "$user_link"
-    chmod 0755 "$src" || true
-    die "test -x ${system_bin} failed. Session files were not installed (sudo failed, or this tree is older than the theme script). Fallback link: ${user_link}. Re-run ./install.sh from this directory. Then, in a new terminal: apollo-theme-nt status"
+  [[ -x "$bin" ]] || die "missing $bin. Root setup did not finish. Re-run ./install.sh from this checkout."
+  [[ -f "$greetd_cfg" ]] || die "missing $greetd_cfg. Root setup did not finish. Re-run ./install.sh from this checkout."
+  if grep -q '^\[initial_session\]' "$greetd_cfg"; then
+    die "$greetd_cfg still has [initial_session] (autologin). Re-run ./install.sh from this checkout."
   fi
-  resolved="$(command -v apollo-theme-nt || true)"
-  if [[ -z "$resolved" || ! -x "$resolved" ]]; then
-    die "command -v apollo-theme-nt failed. ${system_bin} exists but PATH does not find it (PATH=${PATH}). Open a new terminal, or re-run ./install.sh from this checkout."
+  if ! grep -q 'tuigreet' "$greetd_cfg" || ! grep -q '/usr/local/bin/apollo-session' "$greetd_cfg"; then
+    die "$greetd_cfg does not start tuigreet into Apollo. Re-run ./install.sh from this checkout."
   fi
-  info "apollo-theme-nt is on PATH: ${resolved}"
-}
-
-require_nt_assets() {
-  local data="${XDG_DATA_HOME:-$HOME/.local/share}"
-  local missing=0 f
-  local -a need=(
-    "$data/aurorae/themes/NTLegacyWin98/metadata.desktop"
-    "$data/aurorae/themes/NTLegacyWin98/decoration.svg"
-    "$data/aurorae/themes/NTLegacyWin98/NTLegacyWin98rc"
-    "$data/aurorae/themes/NTLegacyWin98Nacht/metadata.desktop"
-    "$data/aurorae/themes/NTLegacyWin98Nacht/decoration.svg"
-    "$data/aurorae/themes/NTLegacyWin98Nacht/NTLegacyWin98Nachtrc"
-    "$data/color-schemes/NTLegacyWin98.colors"
-    "$data/color-schemes/NTLegacyWin98Nacht.colors"
-    "$data/icons/NTLegacyIcons/index.theme"
-    "$data/icons/NTLegacyIconsNacht/index.theme"
-  )
-  for f in "${need[@]}"; do
-    if [[ ! -e "$f" ]]; then
-      warn "missing NT asset: $f"
-      missing=1
-    fi
-  done
-  if [[ "$missing" -ne 0 ]]; then
-    die "NT Legacy assets are incomplete, so the theme cannot apply. Re-run ./install.sh from this checkout (it must contain scripts/apollo-theme-nt.sh). Then run: apollo-theme-nt status"
+  if [[ -e /usr/local/bin/apollo-theme-nt || -e /usr/local/share/apollo/scripts/apollo-theme-nt.sh ]]; then
+    die "NT theme command is still installed. Re-run ./install.sh from this checkout."
   fi
-  info "NT Legacy assets are present under $data"
+  info "apollo-session and greetd password login are installed"
 }
 
 if [[ ${EUID:-0} -eq 0 ]]; then
@@ -201,13 +164,12 @@ PACMAN_PKGS=(
   kwin
   breeze
   breeze-icons
-  # Aurorae draws NT Legacy title bars. kwin already depends on it; listed
-  # so the decoration engine is not only a transitive dependency.
-  aurorae
-  # Qt platform theme: colours, icons, and widgetStyle from kdeglobals.
+  # Qt platform theme: Breeze colours, icons, and fonts from kdeglobals.
   # This does not install plasmashell.
   plasma-integration
   dbus
+  # Present for KWin and the screen locker. Apollo does not register
+  # shortcuts and does not start kglobalacceld.
   kglobalaccel
   kglobalacceld
   kscreenlocker
@@ -224,7 +186,9 @@ PACMAN_PKGS=(
   # Pulse socket for pavucontrol-qt. Provides pulse-native-provider.
   # Do not install pulseaudio.
   pipewire-pulse
+  # Password greeter. config/greetd/config.toml has no autologin block.
   greetd
+  greetd-tuigreet
   # NVIDIA: open kernel modules + userspace; VA-API via libva-nvidia-driver.
   # nvidia-utils already pulls egl-wayland / egl-gbm / libglvnd; Arch enables modeset.
   nvidia-open
@@ -243,9 +207,8 @@ PACMAN_PKGS=(
   cliphist
   wl-clip-persist
   spectacle
-  # Qt file manager. Dolphin's capacity bar ignores the Windows widget
-  # style; PCManFM-Qt follows it. The desktop module is OnlyShowIn=LXQt
-  # and does not start in an Apollo session.
+  # Qt file manager. The desktop module is OnlyShowIn=LXQt and does not
+  # start in an Apollo session.
   pcmanfm-qt
   # Qt PulseAudio mixer (pavucontrol-qt). No shell button yet.
   pavucontrol-qt
@@ -273,7 +236,7 @@ PACMAN_PKGS=(
 
 # awww replaced swww. pacman -Si does not need root. Do not ask the root
 # shell to write a user-owned temp file: a private /tmp rejects that, and
-# the whole install then stops before apollo-theme-nt is copied.
+# the whole install then stops before the session files are copied.
 info "installing official packages..."
 AWWW_FROM_OFFICIAL=0
 if pacman -Si awww >/dev/null 2>&1; then
@@ -293,10 +256,10 @@ fi
 root_status=0
 apply_root_setup "$FISH_BIN" || root_status=$?
 install_fish_path
-require_theme_command
 if [[ "$root_status" -ne 0 ]]; then
   die "root setup failed (exit ${root_status}). /usr/local session files may be incomplete. Re-run ./install.sh from this checkout."
 fi
+require_session_install
 
 # --- AUR helper (yay) ---
 install_yay() {
@@ -325,13 +288,6 @@ if [[ "$AWWW_FROM_OFFICIAL" -ne 1 ]]; then
 fi
 info "installing AUR packages: ${AUR_PKGS[*]}"
 yay -S --needed --noconfirm "${AUR_PKGS[@]}"
-
-# KWin's shortcut service resolves kitty.desktop through the KService cache.
-# A missing cache is not fatal: ~/.local/share/kglobalaccel/kitty.desktop is
-# the fallback installed below.
-if command -v kbuildsycoca6 >/dev/null 2>&1; then
-  kbuildsycoca6 --noincremental >/dev/null 2>&1 || warn "kbuildsycoca6 failed; Meta+T still has the kglobalaccel kitty.desktop fallback"
-fi
 
 # --- fonts ---
 # IBM Plex release zips mix in woff/woff2, so copy desktop OTF only
@@ -564,13 +520,6 @@ install -m 0644 "$ROOT/session/apollo-lock.desktop" "$USER_APP_DIR/apollo-lock.d
 install -m 0644 "$ROOT/session/apollo-logout.desktop" "$USER_APP_DIR/apollo-logout.desktop"
 install -m 0644 "$ROOT/session/apollo-screenshot-region.desktop" "$USER_APP_DIR/apollo-screenshot-region.desktop"
 install -m 0644 "$ROOT/session/apollo-screenshot-full.desktop" "$USER_APP_DIR/apollo-screenshot-full.desktop"
-# Resolved when KService does not know kitty.desktop yet. The component name
-# stays kitty.desktop, matching kglobalshortcutsrc.
-mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/kglobalaccel"
-install -m 0644 "$ROOT/session/kitty.desktop" \
-  "${XDG_DATA_HOME:-$HOME/.local/share}/kglobalaccel/kitty.desktop"
-
-
 
 # --- LazyVim (Neovim distro) ---
 NVIM_CFG="${XDG_CONFIG_HOME:-$HOME/.config}/nvim"
@@ -583,60 +532,143 @@ else
 fi
 
 
-# --- global shortcuts (Super+Q close, Super+T kitty, Super+C screenshots) ---
-KGSRC="${XDG_CONFIG_HOME:-$HOME/.config}/kglobalshortcutsrc"
-KGSNIP="$ROOT/config/kglobalshortcutsrc.snippet"
-if [[ -f "$KGSNIP" ]]; then
-  mkdir -p "$(dirname "$KGSRC")"
-  if [[ ! -f "$KGSRC" ]]; then
-    install -m 0644 "$KGSNIP" "$KGSRC"
-    info "wrote $KGSRC (Meta+Q close, Meta+T kitty, Meta+Shift+T tiles, Meta+L lock, Meta+Shift+L logout, Meta+C region, Meta+Shift+C fullscreen)"
-  else
-    # idempotent-ish: ensure our bindings exist / override conflicting Meta+T tiles
-    if ! grep -q '^Window Close=Meta+Q' "$KGSRC" 2>/dev/null; then
-      if grep -q '^Window Close=' "$KGSRC"; then
-        sed -i 's/^Window Close=.*/Window Close=Meta+Q\\tAlt+F4,Alt+F4,Close Window/' "$KGSRC"
-      else
-        printf '\n[kwin]\nWindow Close=Meta+Q\\tAlt+F4,Alt+F4,Close Window\n' >> "$KGSRC"
-      fi
-    fi
-    # KWin's compiled default for Edit Tiles is Meta+T. Write the key even
-    # when the file never had that line, or Meta+T stays on the tile editor.
-    if grep -q '^Edit Tiles=' "$KGSRC"; then
-      sed -i 's/^Edit Tiles=.*/Edit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling/' "$KGSRC"
-    elif grep -q '^\[kwin\]' "$KGSRC"; then
-      sed -i '/^\[kwin\]/a Edit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling' "$KGSRC"
-    else
-      printf '\n[kwin]\nEdit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling\n' >> "$KGSRC"
-    fi
-    if ! grep -q '\[services\]\[kitty.desktop\]' "$KGSRC"; then
-      printf '\n[services][kitty.desktop]\n_k_friendly_name=kitty\n_launch=Meta+T,none,Launch kitty\n' >> "$KGSRC"
-    else
-      sed -i '/\[services\]\[kitty.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+T,none,Launch kitty/;}' "$KGSRC" || true
-    fi
-    if ! grep -q '\[services\]\[apollo-lock.desktop\]' "$KGSRC"; then
-      printf '\n[services][apollo-lock.desktop]\n_k_friendly_name=Lock Session\n_launch=Meta+L,none,Lock Session\n' >> "$KGSRC"
-    else
-      sed -i '/\[services\]\[apollo-lock.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+L,none,Lock Session/;}' "$KGSRC" || true
-    fi
-    if ! grep -q '\[services\]\[apollo-logout.desktop\]' "$KGSRC"; then
-      printf '\n[services][apollo-logout.desktop]\n_k_friendly_name=Log Out\n_launch=Meta+Shift+L,none,Log Out\n' >> "$KGSRC"
-    else
-      sed -i '/\[services\]\[apollo-logout.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+Shift+L,none,Log Out/;}' "$KGSRC" || true
-    fi
-    if ! grep -q '\[services\]\[apollo-screenshot-region.desktop\]' "$KGSRC"; then
-      printf '\n[services][apollo-screenshot-region.desktop]\n_k_friendly_name=Capture Region\n_launch=Meta+C,none,Capture Region\n' >> "$KGSRC"
-    else
-      sed -i '/\[services\]\[apollo-screenshot-region.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+C,none,Capture Region/;}' "$KGSRC" || true
-    fi
-    if ! grep -q '\[services\]\[apollo-screenshot-full.desktop\]' "$KGSRC"; then
-      printf '\n[services][apollo-screenshot-full.desktop]\n_k_friendly_name=Capture Full Screen\n_launch=Meta+Shift+C,none,Capture Full Screen\n' >> "$KGSRC"
-    else
-      sed -i '/\[services\]\[apollo-screenshot-full.desktop\]/,/^\[/{s/^_launch=.*/_launch=Meta+Shift+C,none,Capture Full Screen/;}' "$KGSRC" || true
-    fi
-    info "updated shortcuts in $KGSRC"
+# Shortcuts are intentionally disabled. This writes the disabled stub when
+# ~/.config/kglobalshortcutsrc is missing, and only clears Meta/Super on the
+# Apollo actions a previous install already wrote. It does not add bindings.
+# Re-enable: config/kglobalshortcutsrc.snippet.
+set_section_key() {
+  local file="$1" section="$2" key="$3" value="$4" tmp
+  mkdir -p "$(dirname "$file")"
+  [[ -f "$file" ]] || : >"$file"
+  tmp="$(mktemp "$(dirname "$file")/.apollo-ini.XXXXXX")"
+  awk -v section="$section" -v key="$key" -v value="$value" '
+    BEGIN { header = "[" section "]" }
+    $0 == header { insec = 1; found_sec = 1; print; next }
+    /^\[/ {
+      if (insec && !found_key) { print key "=" value; found_key = 1 }
+      insec = 0
+    }
+    insec && index($0, key "=") == 1 { print key "=" value; found_key = 1; next }
+    { print }
+    END {
+      if (!found_sec) {
+        print ""
+        print header
+        print key "=" value
+      } else if (insec && !found_key) {
+        print key "=" value
+      }
+    }
+  ' "$file" >"$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$file"
+}
+
+unbind_service_launch() {
+  local file="$1" section="$2" block
+  block="$(sed -n "/^\\[services\\]\\[${section}\\]/,/^\\[/p" "$file" || true)"
+  [[ -n "$block" ]] || return 0
+  if ! printf '%s\n' "$block" | grep -q '^_launch=.*\(Meta\|Super\)'; then
+    return 0
   fi
-fi
+  sed -i "/^\\[services\\]\\[${section}\\]/,/^\\[/s/^_launch=[^,]*,[^,]*,/_launch=none,none,/" "$file"
+  info "unbound ${section} in $file"
+}
+
+apply_disabled_shortcuts() {
+  local dest="${XDG_CONFIG_HOME:-$HOME/.config}/kglobalshortcutsrc"
+  local snip="$ROOT/config/kglobalshortcutsrc.snippet"
+  local accel="${XDG_DATA_HOME:-$HOME/.local/share}/kglobalaccel/kitty.desktop"
+  local section
+  [[ -f "$snip" ]] || die "missing $snip"
+  mkdir -p "$(dirname "$dest")"
+  if [[ ! -f "$dest" ]]; then
+    install -m 0644 "$snip" "$dest"
+    info "wrote $dest (shortcuts disabled; no Meta/Super bindings)"
+  else
+    if grep -q '^Window Close=.*\(Meta\|Super\)+Q' "$dest"; then
+      sed -i 's/^Window Close=.*/Window Close=Alt+F4,Alt+F4,Close Window/' "$dest"
+      info "removed Meta/Super+Q from Window Close in $dest"
+    fi
+    if grep -q '^Edit Tiles=.*\(Meta\|Super\)' "$dest"; then
+      sed -i 's/^Edit Tiles=.*/Edit Tiles=none,none,Toggle Tiling/' "$dest"
+      info "unbound Edit Tiles in $dest"
+    fi
+    for section in kitty.desktop apollo-lock.desktop apollo-logout.desktop \
+      apollo-screenshot-region.desktop apollo-screenshot-full.desktop; do
+      unbind_service_launch "$dest" "$section"
+    done
+    info "left other shortcuts in $dest unchanged"
+  fi
+  if [[ -f "$accel" && -f "$ROOT/session/kitty.desktop" ]] && cmp -s "$accel" "$ROOT/session/kitty.desktop"; then
+    rm -f "$accel"
+    info "removed shortcut fallback $accel"
+  fi
+}
+
+# Drop NT Legacy / Aurorae assets and point decoration, colours, and icons
+# back at stock Breeze when a previous install selected that theme.
+remove_nt_legacy() {
+  local cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
+  local data="${XDG_DATA_HOME:-$HOME/.local/share}"
+  local cache="${XDG_CACHE_HOME:-$HOME/.cache}"
+  local kwinrc="$cfg/kwinrc"
+  local kdeglobals="$cfg/kdeglobals"
+  local pcmanfm="$cfg/pcmanfm-qt/default/settings.conf"
+  local tmp
+
+  rm -f "${HOME}/.local/bin/apollo-theme-nt"
+  rm -rf \
+    "$data/aurorae/themes/NTLegacyWin98" \
+    "$data/aurorae/themes/NTLegacyWin98Nacht" \
+    "$data/icons/NTLegacyIcons" \
+    "$data/icons/NTLegacyIconsNacht" \
+    "$data/apollo/nt-legacy"
+  rm -f \
+    "$data/color-schemes/NTLegacyWin98.colors" \
+    "$data/color-schemes/NTLegacyWin98Nacht.colors" \
+    "$cache/apollo/windows-style.ok"
+
+  if [[ -f "$kwinrc" ]] && grep -Eq 'aurorae|NTLegacy|__aurorae__' "$kwinrc"; then
+    set_section_key "$kwinrc" org.kde.kdecoration2 library "org.kde.breeze"
+    set_section_key "$kwinrc" org.kde.kdecoration2 theme "Breeze"
+    info "reset window decoration in $kwinrc to Breeze"
+  fi
+
+  if [[ -f "$kdeglobals" ]] && grep -q 'NTLegacy' "$kdeglobals"; then
+    tmp="$(mktemp "$(dirname "$kdeglobals")/.apollo-breeze.XXXXXX")"
+    awk '
+      /^\[/ { drop = ($0 ~ /^\[Colors:/ || $0 ~ /^\[ColorEffects:/) }
+      !drop { print }
+    ' "$kdeglobals" >"$tmp"
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$kdeglobals"
+    sed -i \
+      -e '/^ColorSchemeHash=/d' \
+      -e '/^contrast=/d' \
+      -e '/^frameContrast=/d' \
+      -e '/^activeBackground=/d' \
+      -e '/^activeForeground=/d' \
+      -e '/^inactiveBackground=/d' \
+      -e '/^inactiveForeground=/d' \
+      -e '/^activeBlend=/d' \
+      -e '/^inactiveBlend=/d' \
+      "$kdeglobals"
+    set_section_key "$kdeglobals" General ColorScheme "Breeze"
+    set_section_key "$kdeglobals" UiSettings ColorScheme "Breeze"
+    set_section_key "$kdeglobals" Icons Theme "breeze"
+    set_section_key "$kdeglobals" KDE widgetStyle "breeze"
+    info "reset colours, icons, and widget style in $kdeglobals to Breeze"
+  fi
+
+  if [[ -f "$pcmanfm" ]] && grep -q 'NTLegacy' "$pcmanfm"; then
+    set_section_key "$pcmanfm" System IconThemeName "breeze"
+    set_section_key "$pcmanfm" System FallbackIconThemeName "breeze"
+    info "reset PCManFM-Qt icons in $pcmanfm to breeze"
+  fi
+}
+
+apply_disabled_shortcuts
 
 # --- wallpapers (pixel-perfect copy, no recompress) ---
 WP_SRC="$ROOT/wallpapers"
@@ -678,40 +710,15 @@ else
   info "keep existing $FCITX_DIR/profile"
 fi
 
-# Assets first, so a new kwinrc never points at a missing Aurorae theme.
-info "installing NT Legacy 98 (win98 / win98-nacht) assets..."
-"$ROOT/scripts/apollo-theme-nt.sh" fetch
-require_nt_assets
-
 KWINRC="${XDG_CONFIG_HOME:-$HOME/.config}/kwinrc"
 mkdir -p "$(dirname "$KWINRC")"
 if [[ ! -f "$KWINRC" ]]; then
   install -m 0644 "$ROOT/config/kwin/kwinrc.snippet" "$KWINRC"
-  info "wrote $KWINRC"
+  info "wrote $KWINRC (Breeze decoration)"
 else
-  info "keep existing $KWINRC (decoration keys are still updated by apollo-theme-nt)"
+  info "keep existing $KWINRC"
 fi
-
-# Re-apply the variant already chosen so a newer script can fill in colour
-# groups and the decoration keys. This does not switch night back to day.
-NT_APPLIED="${XDG_DATA_HOME:-$HOME/.local/share}/apollo/nt-legacy/applied"
-nt_variant="day"
-if [[ -f "$NT_APPLIED" ]]; then
-  nt_variant="$(<"$NT_APPLIED")"
-fi
-case "$nt_variant" in
-  day|night)
-    info "applying NT Legacy 98 ($nt_variant)"
-    "$ROOT/scripts/apollo-theme-nt.sh" "$nt_variant"
-    ;;
-  *)
-    warn "invalid NT Legacy marker ($nt_variant); applying day"
-    "$ROOT/scripts/apollo-theme-nt.sh" day
-    ;;
-esac
-"$ROOT/scripts/apollo-theme-nt.sh" ensure-file-manager
-require_theme_command
-require_nt_assets
+remove_nt_legacy
 
 cat <<DONE
 
@@ -719,40 +726,27 @@ cat <<DONE
 Apollo install finished.
 
 Installed / configured:
-  - Apollo DE: KWin + Quickshell + NT Legacy 98 (no plasmashell)
+  - Apollo DE: KWin + Quickshell, Breeze decoration and colours (no plasmashell)
   - pcmanfm-qt (file manager), pavucontrol-qt (volume mixer)
-  - theme switch: apollo-theme-nt day | night | toggle | status
   - NVIDIA: nvidia-open + nvidia-utils + libva-nvidia-driver
-  - greetd autologin as ${INSTALL_USER} (NO greeter / NO tuigreet / NO SDDM)
+  - greetd + tuigreet: password login as the user you type (no autologin)
   - fish as login shell for ${INSTALL_USER}
   - kitty, yazi, neovim + LazyVim starter
   - fonts: IBM Plex OTF, Noroshi Code, Apple Color Emoji, Symbols Nerd Font
   - awww wallpaper daemon (random image from ~/Pictures/wallpapers/)
   - fcitx5: Sucheng (Quick3) + Mozc romaji
-  - Super+L lock, Super+Shift+L log out
-  - Spectacle: Super+C region, Super+Shift+C full screen
-  - cliphist + wl-clip-persist (clipboard history; regular clipboard survives app exit)
+  - global shortcuts: disabled (no Meta/Super bindings from Apollo)
+  - Spectacle, cliphist, and wl-clip-persist are installed; no shortcut keys
   - NetworkManager + BlueZ
 
-This ./install.sh must come from the checkout that contains
-scripts/apollo-theme-nt.sh (this branch, or main after it is merged).
-An older tree does not install the command. fish then says:
-  Unknown command: apollo-theme-nt
-
-Check in a new terminal (fish reads PATH from ~/.config/fish/conf.d):
-  command -v apollo-theme-nt
-  apollo-theme-nt status
-If that still fails, re-run ./install.sh from this directory.
-
 Next:
-  1) reboot → should land in Apollo automatically
+  1) reboot → tuigreet asks for username and password, then starts Apollo
   2) wallpapers: ~/Pictures/wallpapers/ (awww picks one at login)
   3) edit shell:  ~/.config/quickshell/apollo/shell.qml
   4) edit kwin:   ~/.config/kwinrc
-  5) theme:      apollo-theme-nt day | night | toggle
-     Colours are copied into ~/.config/kdeglobals. Log out once if the
-     title bar or colours stay on the previous look.
+     Decoration and colours are stock Breeze.
      Volume: pavucontrol-qt   Files: pcmanfm-qt
+  5) shortcuts stay off until re-enabled (see config/kglobalshortcutsrc.snippet)
 
 NVIDIA:
   - modeset comes from Arch's nvidia-utils; egl-wayland is a dep of nvidia-utils
@@ -762,6 +756,6 @@ apollod:
     (Wi-Fi, Bluetooth, monitors, Quickshell look/feel, keybinds, exec).
   - Not installed yet; start-apollo.sh launches it when on PATH.
 
-Re-run safely: ./install.sh  (existing user configs are kept)
+Re-run safely: ./install.sh  (existing user configs are kept; greetd config is rewritten)
 ============================================================
 DONE

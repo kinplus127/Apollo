@@ -1,0 +1,13 @@
+[terminal]
+vt = 1
+
+# Password login. tuigreet asks for a username and a password, then greetd
+# starts Apollo as that user. There is no [initial_session] block: that
+# block is greetd autologin and must stay absent.
+#
+# --remember only pre-fills the last username. It does not store or skip
+# the password. --cmd is the session started after a successful login.
+# F3 in tuigreet can still pick another desktop file; the default is Apollo.
+[default_session]
+command = "tuigreet --time --remember --asterisks --greeting 'Sign in to Apollo' --sessions /usr/local/share/wayland-sessions:/usr/share/wayland-sessions --cmd /usr/local/bin/apollo-session"
+user = "greeter"

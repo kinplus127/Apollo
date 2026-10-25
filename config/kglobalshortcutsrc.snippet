@@ -1,26 +1,44 @@
+# Apollo global shortcuts are intentionally disabled.
+# install.sh does not register Meta/Super bindings. scripts/start-apollo.sh
+# does not start kglobalacceld. The live keys below are unbound (or Alt+F4
+# only, which is KWin's stock close shortcut).
+#
+# KConfig treats a leading # as a comment. To re-enable later:
+#   1. Replace the live values with the commented bindings below.
+#   2. Copy session/kitty.desktop to ~/.local/share/kglobalaccel/kitty.desktop
+#   3. On Plasma older than 6.8, start kglobalacceld from scripts/start-apollo.sh.
+#      Plasma 6.8 and newer handle these shortcuts inside KWin.
+#   4. Log out and back in.
+#
+# Previous bindings:
+#   Window Close=Meta+Q\tAlt+F4,Alt+F4,Close Window
+#   Edit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling
+#   kitty _launch=Meta+T,none,Launch kitty
+#   lock _launch=Meta+L,none,Lock Session
+#   logout _launch=Meta+Shift+L,none,Log Out
+#   region _launch=Meta+C,none,Capture Region
+#   full screen _launch=Meta+Shift+C,none,Capture Full Screen
+
 [kwin]
-# Super+Q → close focused window (Alt+F4 kept as secondary)
-# Super+T → kitty (see services below); Edit Tiles moved to Super+Shift+T
-Window Close=Meta+Q\tAlt+F4,Alt+F4,Close Window
-Edit Tiles=Meta+Shift+T,Meta+T,Toggle Tiling
-Kill Window=Meta+Ctrl+Esc,Meta+Ctrl+Esc,Kill Window
+Window Close=Alt+F4,Alt+F4,Close Window
+Edit Tiles=none,none,Toggle Tiling
 
 [services][kitty.desktop]
 _k_friendly_name=kitty
-_launch=Meta+T,none,Launch kitty
+_launch=none,none,Launch kitty
 
 [services][apollo-lock.desktop]
 _k_friendly_name=Lock Session
-_launch=Meta+L,none,Lock Session
+_launch=none,none,Lock Session
 
 [services][apollo-logout.desktop]
 _k_friendly_name=Log Out
-_launch=Meta+Shift+L,none,Log Out
+_launch=none,none,Log Out
 
 [services][apollo-screenshot-region.desktop]
 _k_friendly_name=Capture Region
-_launch=Meta+C,none,Capture Region
+_launch=none,none,Capture Region
 
 [services][apollo-screenshot-full.desktop]
 _k_friendly_name=Capture Full Screen
-_launch=Meta+Shift+C,none,Capture Full Screen
+_launch=none,none,Capture Full Screen

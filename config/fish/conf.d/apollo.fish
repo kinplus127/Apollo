@@ -1,5 +1,5 @@
-# greetd often omits /usr/local/bin. fish then reports
-# "Unknown command: apollo-theme-nt" inside kitty.
+# A greetd session can omit /usr/local/bin and ~/.local/bin.
+# Keep both on PATH for fish terminals started from Apollo.
 if not contains -- $HOME/.local/bin $PATH
     set -gx PATH $HOME/.local/bin $PATH
 end
