@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Lock the Apollo session without plasmashell.
 # KWin handles logind's lock signal when kscreenlocker is installed.
+# The greeter is a child of KWin, not of this script. Keyboard input is fixed
+# in kscreenlocker-greet-wrapper.sh (QT_IM_MODULE=compose for that process).
 set -u
 
 locked=0
