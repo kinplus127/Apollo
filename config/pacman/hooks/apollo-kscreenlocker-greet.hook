@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/lib/kscreenlocker_greet
+Target = usr/libexec/kscreenlocker_greet
+
+[Action]
+Description = Apollo: keep the kscreenlocker greeter off the input method
+When = PostTransaction
+Exec = /usr/local/share/apollo/scripts/apollo-setup-lock.sh

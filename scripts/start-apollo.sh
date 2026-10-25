@@ -20,6 +20,10 @@ export __NV_PRIME_RENDER_OFFLOAD="${__NV_PRIME_RENDER_OFFLOAD:-1}"
 export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-nvidia}"
 
 # fcitx5: module name stays "fcitx" (Sucheng + Mozc are enabled in the profile).
+# KWin copies this environment into kscreenlocker_greet. The greeter path is a
+# wrapper (kscreenlocker-greet-wrapper.sh) that sets QT_IM_MODULE=compose for
+# that process only, so Quick3 cannot eat the password. Leave these exports
+# in place for the rest of the session.
 export XMODIFIERS="${XMODIFIERS:-@im=fcitx}"
 export GTK_IM_MODULE="${GTK_IM_MODULE:-fcitx}"
 export QT_IM_MODULE="${QT_IM_MODULE:-fcitx}"

@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Remove
+Type = Path
+Target = usr/lib/kscreenlocker_greet
+Target = usr/libexec/kscreenlocker_greet
+
+[Action]
+Description = Apollo: remove the kscreenlocker greeter wrapper leftovers
+When = PostTransaction
+Exec = /usr/local/share/apollo/scripts/apollo-remove-lock-wrap.sh

@@ -74,18 +74,29 @@ fi
 
 share=/usr/local/share/apollo
 log "installing session scripts to $share"
-mkdir -p "$share/scripts" /usr/local/share/wayland-sessions /usr/local/bin \
-  /usr/local/share/applications /etc/greetd
+mkdir -p "$share/scripts" "$share/pam" /usr/local/share/wayland-sessions /usr/local/bin \
+  /usr/local/share/applications /etc/greetd /etc/pacman.d/hooks
 install -m 0755 "$root/scripts/start-apollo.sh" "$share/scripts/start-apollo.sh"
 install -m 0755 "$root/scripts/apollo-session" /usr/local/bin/apollo-session
 install -m 0755 "$root/scripts/apollo-lock.sh" "$share/scripts/apollo-lock.sh"
 install -m 0755 "$root/scripts/apollo-logout.sh" "$share/scripts/apollo-logout.sh"
 rm -f /usr/local/bin/apollo-theme-nt "$share/scripts/apollo-theme-nt.sh"
+install -m 0755 "$root/scripts/kscreenlocker-greet-wrapper.sh" "$share/scripts/kscreenlocker-greet-wrapper.sh"
+install -m 0755 "$root/scripts/apollo-setup-lock.sh" "$share/scripts/apollo-setup-lock.sh"
+install -m 0755 "$root/scripts/apollo-remove-lock-wrap.sh" "$share/scripts/apollo-remove-lock-wrap.sh"
+install -m 0644 "$root/config/pam/kde" "$share/pam/kde"
+install -m 0644 "$root/config/pacman/hooks/apollo-kscreenlocker-greet.hook" \
+  /etc/pacman.d/hooks/apollo-kscreenlocker-greet.hook
+install -m 0644 "$root/config/pacman/hooks/apollo-kscreenlocker-greet-remove.hook" \
+  /etc/pacman.d/hooks/apollo-kscreenlocker-greet-remove.hook
 install -m 0644 "$root/session/apollo.desktop" /usr/local/share/wayland-sessions/apollo.desktop
 install -m 0644 "$root/session/apollo-lock.desktop" /usr/local/share/applications/apollo-lock.desktop
 install -m 0644 "$root/session/apollo-logout.desktop" /usr/local/share/applications/apollo-logout.desktop
 install -m 0644 "$root/session/apollo-screenshot-region.desktop" /usr/local/share/applications/apollo-screenshot-region.desktop
 install -m 0644 "$root/session/apollo-screenshot-full.desktop" /usr/local/share/applications/apollo-screenshot-full.desktop
+# kscreenlocker is already installed. PAM "kde" if the package did not ship
+# one, and a greeter wrapper so fcitx does not swallow the password.
+"$share/scripts/apollo-setup-lock.sh"
 rm -f /usr/local/bin/universe-kwin-session \
   /usr/local/share/wayland-sessions/universe-kwin.desktop
 rm -rf /usr/local/share/universe-kwin
@@ -736,6 +747,8 @@ Installed / configured:
   - awww wallpaper daemon (random image from ~/Pictures/wallpapers/)
   - fcitx5: Sucheng (Quick3) + Mozc romaji
   - global shortcuts: disabled (no Meta/Super bindings from Apollo)
+  - lock: kscreenlocker; the greeter uses compose, not fcitx
+    Run /usr/local/share/apollo/scripts/apollo-lock.sh (Super+L is unbound)
   - Spectacle, cliphist, and wl-clip-persist are installed; no shortcut keys
   - NetworkManager + BlueZ
 
@@ -747,6 +760,11 @@ Next:
      Decoration and colours are stock Breeze.
      Volume: pavucontrol-qt   Files: pcmanfm-qt
   5) shortcuts stay off until re-enabled (see config/kglobalshortcutsrc.snippet)
+  6) lock: /usr/local/share/apollo/scripts/apollo-lock.sh
+     Type the account password and press Enter.
+     If the screen stays locked: Ctrl+Alt+F3, log in, then
+     loginctl unlock-session SESSION_ID
+     (loginctl list-sessions prints SESSION_ID)
 
 NVIDIA:
   - modeset comes from Arch's nvidia-utils; egl-wayland is a dep of nvidia-utils

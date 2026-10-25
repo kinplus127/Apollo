@@ -94,6 +94,37 @@ fcitx5 starts with the session (`fcitx5 -d`) and these variables: `XMODIFIERS=@i
 
 The seeded profile (`~/.config/fcitx5/profile`, only if you do not already have one) enables **速成** (`Quick3`, the zh_HK table from `fcitx5-table-extra`) and **日本語 Mozc** (ローマ字, `fcitx5-mozc`), plus the US keyboard. An existing profile is left as it is.
 
+## Lock and unlock
+
+Apollo does not bind Super+L. Lock from a terminal:
+
+```bash
+/usr/local/share/apollo/scripts/apollo-lock.sh
+```
+
+That runs `loginctl lock-session`, then the KDE screensaver D-Bus `Lock` methods. KWin starts `kscreenlocker_greet`. plasmashell is not involved. The password is checked by PAM service `kde`. tuigreet's login PAM is a different path and is left as it is.
+
+Arch's `kscreenlocker` package ships the locker service as `/usr/lib/pam.d/kde` (`auth include system-local-login`). `install.sh` writes `/etc/pam.d/kde` from `config/pam/kde` only when neither that path nor `/usr/lib/pam.d/kde` already has an auth stack. On the next `install.sh` or `kscreenlocker` upgrade, an Apollo-written fallback is removed once the package file has an auth stack.
+
+The session still exports `QT_IM_MODULE=fcitx`, and the seeded profile defaults to 速成. KWin copies the session environment into the greeter, and on Wayland the greeter does not clear `QT_IM_MODULE` (KDE bug 306932). 速成 then holds the keystrokes and the candidate window cannot appear on the lock screen, so the password looks dead. `install.sh` points `/usr/lib/kscreenlocker_greet` at `kscreenlocker-greet-wrapper.sh`, which sets `QT_IM_MODULE=compose` for that process only. Kitty, the browser, and other clients keep fcitx5. A pacman hook reapplies the wrapper after a `kscreenlocker` upgrade.
+
+From a logged-in Apollo session:
+
+1. Run `apollo-lock.sh` (or `loginctl lock-session`). The lock screen appears.
+2. Type the account password and press Enter. The session unlocks.
+3. 速成 and Mozc still work in an application after unlock.
+
+If the screen stays locked, switch to another TTY (Ctrl+Alt+F3), log in as the same user, and unlock this session:
+
+```bash
+loginctl list-sessions
+loginctl unlock-session SESSION_ID
+```
+
+Ctrl+Alt+F1 returns to the tuigreet VT. `loginctl terminate-session SESSION_ID` ends the locked session instead. tuigreet asks for the password again, and unsaved work in the old session is gone.
+
+鎖定與解鎖：Apollo 沒有綁定 Super+L。在終端機執行 `/usr/local/share/apollo/scripts/apollo-lock.sh`（或 `loginctl lock-session`），由 KWin 啟動 `kscreenlocker_greet`，密碼經 PAM 服務 `kde` 核對。tuigreet 的登入密碼維持不變。工作階段的 fcitx5（速成、Mozc）維持不變；解鎖程式會改用 `QT_IM_MODULE=compose`，密碼按鍵才會進入欄位。`kscreenlocker` 升級後，pacman hook 會重新套上這個包裝。解鎖失敗時，到另一個 TTY 登入，執行 `loginctl list-sessions`，再執行 `loginctl unlock-session SESSION_ID`。`loginctl terminate-session SESSION_ID` 會結束該工作階段，tuigreet 會再詢問密碼，尚未儲存的資料會消失。
+
 ## Session bus
 
 `apollo-session` runs `start-apollo.sh` inside `dbus-run-session` when `DBUS_SESSION_BUS_ADDRESS` is unset, so KWin, Quickshell, and fcitx5 share one session bus. If a bus is already present, it is not wrapped again.
