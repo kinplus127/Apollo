@@ -12,7 +12,7 @@ rm -f \
 
 if [[ -f "$etc_file" ]] && grep -q 'APOLLO_KSCREENLOCKER_PAM' "$etc_file"; then
   rm -f "$etc_file"
-  log "removed Apollo PAM fallback $etc_file"
+  log "removed Apollo PAM service $etc_file"
 fi
 
 log "removed kscreenlocker greeter wrapper leftovers"

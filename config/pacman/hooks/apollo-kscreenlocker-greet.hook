@@ -6,6 +6,6 @@ Target = usr/lib/kscreenlocker_greet
 Target = usr/libexec/kscreenlocker_greet
 
 [Action]
-Description = Apollo: keep the kscreenlocker greeter off the input method
+Description = Apollo: reapply the lock greeter, lock screen, and PAM
 When = PostTransaction
 Exec = /usr/local/share/apollo/scripts/apollo-setup-lock.sh
