@@ -1,17 +1,13 @@
-# Merged into ~/.config/kwinrc by install.sh if missing keys.
-# Floating by default; enable a tiling script later (e.g. Krohnkite).
+# Copied to ~/.config/kwinrc by install.sh when that file is missing.
+# Stock Breeze decoration. Floating by default.
 
 [Windows]
 BorderlessMaximizedWindows=false
 Placement=Centered
 
 [org.kde.kdecoration2]
-# NT Legacy 98 day. scripts/apollo-theme-nt.sh switches the day/night pair.
-# Keep the v1 library id. KWin 6.6+ rewrites it to org.kde.kwin.aurorae.v2
-# when the theme starts with __aurorae__svg__. Setting .v2 here makes
-# Plasma 6.0–6.5 fall back to Breeze with no error.
-library=org.kde.kwin.aurorae
-theme=__aurorae__svg__NTLegacyWin98
+library=org.kde.breeze
+theme=Breeze
 
 [ModifierKeyEvents]
 Meta=Meta

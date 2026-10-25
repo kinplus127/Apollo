@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End this Apollo session. greetd starts it again after exit.
+# End this Apollo session. greetd returns to tuigreet afterwards.
 set -u
 
 sid="${XDG_SESSION_ID:-}"
