@@ -1,0 +1,9 @@
+{
+    "KPackageStructure": "Plasma/Shell",
+    "KPlugin": {
+        "Id": "org.kde.apollo",
+        "Name": "Apollo",
+        "Description": "Lock screen that sends the typed password after PAM asks for it"
+    },
+    "X-Plasma-APIVersion": "2"
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PAM service "kde" and the kscreenlocker greeter wrapper.
+# PAM service "kde", the Apollo lock-screen package, and the greeter wrapper.
 # Called from install.sh and from the pacman hook after kscreenlocker
 # is installed or upgraded. One sudo invocation in install.sh covers this.
 set -euo pipefail
@@ -25,36 +25,49 @@ is_wrapper_text() {
   head -n 15 "$file" | grep -q 'APOLLO_KSCREENLOCKER_GREET_WRAPPER'
 }
 
+# Arch's kscreenlocker file is only "auth include system-local-login".
+# That include is a login policy (pam_shells, pam_nologin), not a locker check.
+is_stock_kde_pam() {
+  local file="$1"
+  local line lines
+  [[ -f "$file" && ! -L "$file" ]] || return 1
+  lines="$(grep -E '^[[:space:]]*auth[[:space:]]+' "$file" || true)"
+  [[ -n "$lines" ]] || return 1
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*auth[[:space:]]+include[[:space:]]+system-local-login[[:space:]]*$ ]] || return 1
+  done <<<"$lines"
+}
+
 install_kde_pam() {
   local etc_dir="${APOLLO_PAM_ETC:-/etc/pam.d}"
-  local vendor_dir="${APOLLO_PAM_VENDOR:-/usr/lib/pam.d}"
   local template="${APOLLO_PAM_TEMPLATE:-/usr/local/share/apollo/pam/kde}"
   local etc_file="$etc_dir/kde"
-  local vendor_file="$vendor_dir/kde"
-
-  if has_auth_stack "$vendor_file"; then
-    if is_apollo_pam "$etc_file"; then
-      rm -f "$etc_file"
-      log "PAM service kde: using $vendor_file (removed Apollo fallback)"
-      return 0
-    fi
-    if has_auth_stack "$etc_file"; then
-      log "PAM service kde: keeping $etc_file"
-      return 0
-    fi
-    log "PAM service kde: using $vendor_file"
-    return 0
-  fi
-
-  if has_auth_stack "$etc_file"; then
-    log "PAM service kde: keeping $etc_file"
-    return 0
-  fi
 
   [[ -f "$template" ]] || die "PAM template missing ($template)"
+
+  if [[ -f "$etc_file" && ! -L "$etc_file" ]]; then
+    if ! is_apollo_pam "$etc_file" && ! is_stock_kde_pam "$etc_file" && has_auth_stack "$etc_file"; then
+      log "PAM service kde: keeping custom $etc_file"
+      log "warning: unlock expects Apollo's pam_unix stack in $etc_file. Move that file aside and re-run ./install.sh if the correct password still fails."
+      return 0
+    fi
+  fi
+
   mkdir -p "$etc_dir"
   install -m 0644 "$template" "$etc_file"
-  log "installed PAM fallback $etc_file (kscreenlocker service kde)"
+  log "installed locker PAM $etc_file (pam_unix; does not include system-local-login)"
+}
+
+install_lock_shell() {
+  local src="${APOLLO_LOCK_SHELL_SRC:-/usr/local/share/apollo/lockscreen}"
+  local dest="${APOLLO_LOCK_SHELL_DEST:-/usr/local/share/plasma/shells/org.kde.apollo}"
+
+  [[ -f "$src/metadata.json" ]] || die "lock screen metadata missing ($src/metadata.json)"
+  [[ -f "$src/contents/lockscreen/LockScreen.qml" ]] || die "lock screen QML missing ($src/contents/lockscreen/LockScreen.qml)"
+  mkdir -p "$dest/contents/lockscreen"
+  install -m 0644 "$src/metadata.json" "$dest/metadata.json"
+  install -m 0644 "$src/contents/lockscreen/LockScreen.qml" "$dest/contents/lockscreen/LockScreen.qml"
+  log "installed lock screen $dest"
 }
 
 pick_greet_bin() {
@@ -117,4 +130,5 @@ wrap_greeter() {
 }
 
 install_kde_pam
+install_lock_shell
 wrap_greeter

@@ -85,6 +85,11 @@ install -m 0755 "$root/scripts/kscreenlocker-greet-wrapper.sh" "$share/scripts/k
 install -m 0755 "$root/scripts/apollo-setup-lock.sh" "$share/scripts/apollo-setup-lock.sh"
 install -m 0755 "$root/scripts/apollo-remove-lock-wrap.sh" "$share/scripts/apollo-remove-lock-wrap.sh"
 install -m 0644 "$root/config/pam/kde" "$share/pam/kde"
+rm -rf "$share/lockscreen"
+mkdir -p "$share/lockscreen/contents/lockscreen"
+install -m 0644 "$root/config/lockscreen/metadata.json" "$share/lockscreen/metadata.json"
+install -m 0644 "$root/config/lockscreen/contents/lockscreen/LockScreen.qml" \
+  "$share/lockscreen/contents/lockscreen/LockScreen.qml"
 install -m 0644 "$root/config/pacman/hooks/apollo-kscreenlocker-greet.hook" \
   /etc/pacman.d/hooks/apollo-kscreenlocker-greet.hook
 install -m 0644 "$root/config/pacman/hooks/apollo-kscreenlocker-greet-remove.hook" \
@@ -94,8 +99,8 @@ install -m 0644 "$root/session/apollo-lock.desktop" /usr/local/share/application
 install -m 0644 "$root/session/apollo-logout.desktop" /usr/local/share/applications/apollo-logout.desktop
 install -m 0644 "$root/session/apollo-screenshot-region.desktop" /usr/local/share/applications/apollo-screenshot-region.desktop
 install -m 0644 "$root/session/apollo-screenshot-full.desktop" /usr/local/share/applications/apollo-screenshot-full.desktop
-# kscreenlocker is already installed. PAM "kde" if the package did not ship
-# one, and a greeter wrapper so fcitx does not swallow the password.
+# kscreenlocker is already installed. Install the locker PAM stack, the
+# Apollo lock screen, and the greeter wrapper.
 "$share/scripts/apollo-setup-lock.sh"
 rm -f /usr/local/bin/universe-kwin-session \
   /usr/local/share/wayland-sessions/universe-kwin.desktop
@@ -747,7 +752,7 @@ Installed / configured:
   - awww wallpaper daemon (random image from ~/Pictures/wallpapers/)
   - fcitx5: Sucheng (Quick3) + Mozc romaji
   - global shortcuts: disabled (no Meta/Super bindings from Apollo)
-  - lock: kscreenlocker; the greeter uses compose, not fcitx
+  - lock: kscreenlocker with Apollo's lock screen and PAM service kde
     Run /usr/local/share/apollo/scripts/apollo-lock.sh (Super+L is unbound)
   - Spectacle, cliphist, and wl-clip-persist are installed; no shortcut keys
   - NetworkManager + BlueZ
@@ -761,7 +766,8 @@ Next:
      Volume: pavucontrol-qt   Files: pcmanfm-qt
   5) shortcuts stay off until re-enabled (see config/kglobalshortcutsrc.snippet)
   6) lock: /usr/local/share/apollo/scripts/apollo-lock.sh
-     Type the account password and press Enter.
+     Type the account password and press Unlock or Enter.
+     The session should unlock. fcitx5 still works in applications.
      If the screen stays locked: Ctrl+Alt+F3, log in, then
      loginctl unlock-session SESSION_ID
      (loginctl list-sessions prints SESSION_ID)
